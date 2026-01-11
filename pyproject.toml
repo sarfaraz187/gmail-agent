@@ -17,6 +17,7 @@ dependencies = [
     "google-auth-oauthlib>=1.0.0",
     "google-api-python-client>=2.0.0",
     "google-cloud-secret-manager>=2.0.0",
+    "google-cloud-firestore>=2.0.0",
 ]
 
 [project.optional-dependencies]
