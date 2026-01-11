@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from email_agent.api.routes import router
+from email_agent.api.webhook import webhook_router
 from email_agent.config import settings
 
 logging.basicConfig(
@@ -30,6 +31,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(webhook_router)
 
 
 @app.on_event("startup")
