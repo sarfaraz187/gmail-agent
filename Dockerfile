@@ -3,8 +3,8 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml ./
+# Copy dependency files (README.md needed for hatchling build)
+COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 
 # Install dependencies using UV
@@ -25,7 +25,7 @@ COPY --from=builder /app/.venv /app/.venv
 
 # Copy application code
 COPY src ./src
-COPY config.yaml* ./
+COPY config.yaml ./
 
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH"

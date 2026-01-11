@@ -1,3 +1,6 @@
+# This file specifies files ignored by gcloud for Cloud Run deployments
+# Note: .gitignore excludes uv.lock but we NEED it for builds
+
 # Git
 .git
 .gitignore
@@ -29,9 +32,10 @@ htmlcov
 .tox
 .nox
 
-# Documentation
+# Documentation (except README)
 docs
-PLAN.md
+*.md
+!README.md
 
 # Development files
 .env
@@ -57,4 +61,7 @@ tests
 # Build artifacts
 dist
 build
-*.egg-info
+
+# OAuth credentials
+credentials.json
+token.json

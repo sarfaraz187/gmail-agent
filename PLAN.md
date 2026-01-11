@@ -921,20 +921,20 @@ uv run pytest tests/unit/test_tone_detector.py -v
 
 ---
 
-### Phase 7: Gmail Push Notifications
+### Phase 7: Gmail Push Notifications ✅ COMPLETED
 **Goal:** Event-driven email processing via Pub/Sub
 
 **Tasks:**
-- [ ] Create Pub/Sub topic for Gmail notifications
-- [ ] Grant Gmail API publish permissions
-- [ ] Create push subscription to Cloud Run
-- [ ] Implement `/webhook/gmail` endpoint
-- [ ] Implement `/renew-watch` endpoint
-- [ ] Set up Gmail watch on "Agent Respond" label
-- [ ] Create Cloud Scheduler job for watch renewal (every 6 days)
-- [ ] Create Gmail labels: "Agent Respond", "Agent Done", "Agent Pending"
-- [ ] Implement history ID tracking (Firestore) to avoid missing emails
-- [ ] Implement full thread fetching (`threads.get()` instead of `messages.get()`)
+- [x] Create Pub/Sub topic for Gmail notifications
+- [x] Grant Gmail API publish permissions
+- [x] Create push subscription to Cloud Run
+- [x] Implement `/webhook/gmail` endpoint
+- [x] Implement `/renew-watch` endpoint
+- [x] Set up Gmail watch on "Agent Respond" label
+- [x] Create Cloud Scheduler job for watch renewal (every 6 days)
+- [x] Create Gmail labels: "Agent Respond", "Agent Done", "Agent Pending"
+- [x] Implement history ID tracking (Firestore) to avoid missing emails
+- [x] Implement full thread fetching (`threads.get()` instead of `messages.get()`)
 
 **New Files:**
 - `src/email_agent/api/webhook.py`
@@ -1108,8 +1108,8 @@ Phase 3:  Basic LLM           [████████████] 100% ✅
 Phase 4:  Google Add-on       [████████████] 100% ✅
 Phase 5:  Testing Setup       [████████████] 100% ✅
 Phase 6:  GCP Deployment      [████████████] 100% ✅
-Phase 7:  Gmail Push          [░░░░░░░░░░░░]   0%  ← NEXT
-Phase 8:  Decision Classifier [░░░░░░░░░░░░]   0%
+Phase 7:  Gmail Push          [████████████] 100% ✅
+Phase 8:  Decision Classifier [░░░░░░░░░░░░]   0%  ← NEXT
 Phase 9:  Notifications       [──────SKIP──] MVP (future)
 Phase 10: Gmail Send/Labels   [░░░░░░░░░░░░]   0%
 Phase 11: Memory System       [░░░░░░░░░░░░]   0%
@@ -1321,3 +1321,11 @@ curl https://your-agent.run.app/status
 | 2026-01-11 | Created `src/email_agent/gmail/auth.py` for Secret Manager integration |
 | 2026-01-11 | Configured OAuth2 consent screen and credentials |
 | 2026-01-11 | Stored `openai-api-key` and `gmail-refresh-token` in Secret Manager |
+| 2026-01-12 | **Phase 7 Completed: Gmail Push Notifications** |
+| 2026-01-12 | Deployed Cloud Run service: `https://email-agent-559279704554.europe-west1.run.app` |
+| 2026-01-12 | Created Pub/Sub topic `gmail-agent` and subscription `gmail-agent-sub` |
+| 2026-01-12 | Created Cloud Scheduler job `gmail-watch-renewal` (every 6 days) |
+| 2026-01-12 | Set up Firestore for history ID tracking |
+| 2026-01-12 | Created Gmail labels: Agent Respond, Agent Done, Agent Pending |
+| 2026-01-12 | Fixed: Export history_tracker singleton in storage module |
+| 2026-01-12 | Fixed: Process labelsAdded in webhook (not just messagesAdded) |

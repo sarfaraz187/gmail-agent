@@ -1,0 +1,19 @@
+# Email Agent Configuration
+# See PLAN.md for details on each setting
+
+user:
+  email: ""  # Your email address (set via environment or override)
+  signature: |
+    Best regards
+
+preferences:
+  default_tone: "professional"
+
+  # Always ask user before responding to these senders
+  always_notify_senders: []
+
+  # Types of emails to auto-respond without asking
+  auto_respond_types:
+    - "meeting_confirmation"
+    - "simple_acknowledgment"
+    - "scheduling_request"

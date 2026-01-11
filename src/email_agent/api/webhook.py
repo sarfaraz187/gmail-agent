@@ -86,17 +86,48 @@ async def handle_gmail_webhook(request: PubSubPushRequest) -> WebhookAckResponse
             history_tracker.update_history_id(notification.historyId)
             return WebhookAckResponse(status="history_error", processed=0, skipped=0)
 
-        # 5. Process new messages
+        # 5. Process new messages and label additions
         processed = 0
         skipped = 0
+        seen_message_ids = set()  # Avoid processing same message twice
 
         for record in history_records:
+            # Process newly added messages
             for msg in record.messages_added:
                 message_id = msg.get("id")
                 thread_id = msg.get("threadId")
 
                 if not message_id or not thread_id:
                     continue
+
+                if message_id in seen_message_ids:
+                    continue
+                seen_message_ids.add(message_id)
+
+                result = _process_message(message_id, thread_id)
+                if result == "processed":
+                    processed += 1
+                else:
+                    skipped += 1
+
+            # Process labels added to existing messages
+            for label_record in record.labels_added:
+                msg = label_record.get("message", {})
+                label_ids = label_record.get("labelIds", [])
+
+                # Only process if Agent Respond label was added
+                if respond_label_id not in label_ids:
+                    continue
+
+                message_id = msg.get("id")
+                thread_id = msg.get("threadId")
+
+                if not message_id or not thread_id:
+                    continue
+
+                if message_id in seen_message_ids:
+                    continue
+                seen_message_ids.add(message_id)
 
                 result = _process_message(message_id, thread_id)
                 if result == "processed":
