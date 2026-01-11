@@ -6,7 +6,10 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 
 from email_agent.config import settings
-from email_agent.prompts.templates import DRAFT_GENERATION_PROMPT, format_thread_for_prompt
+from email_agent.prompts.templates import (
+    DRAFT_GENERATION_PROMPT,
+    format_thread_for_prompt,
+)
 from email_agent.services.tone_detector import tone_detector
 
 logger = logging.getLogger(__name__)

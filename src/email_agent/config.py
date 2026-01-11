@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     openai_api_key: str
 
     # Application
-    app_name: str = "Gmail AI Draft Agent"
+    app_name: str = "Gmail AI Agent"
     app_version: str = "0.1.0"
     debug: bool = False
 

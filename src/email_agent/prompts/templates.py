@@ -43,13 +43,13 @@ def format_thread_for_prompt(thread: list[dict]) -> str:
     for i, msg in enumerate(thread, 1):
         from_addr = msg.get("from_") or msg.get("from", "Unknown")
         formatted = f"""--- Email {i} ---
-From: {from_addr}
-To: {msg.get('to', 'Unknown')}
-Date: {msg.get('date', 'Unknown')}
-Subject: {msg.get('subject', 'No Subject')}
+                    From: {from_addr}
+                    To: {msg.get("to", "Unknown")}
+                    Date: {msg.get("date", "Unknown")}
+                    Subject: {msg.get("subject", "No Subject")}
 
-{msg.get('body', '')}
-"""
+                    {msg.get("body", "")}
+                    """
         formatted_messages.append(formatted)
 
     return "\n".join(formatted_messages)
