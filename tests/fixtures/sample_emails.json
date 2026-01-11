@@ -1,0 +1,79 @@
+{
+  "formal_thread": [
+    {
+      "from_": "john.smith@company.com",
+      "to": "user@example.com",
+      "subject": "Q4 Budget Review Meeting",
+      "date": "2025-01-10T09:00:00Z",
+      "body": "Dear Team,\n\nI would like to schedule a meeting to review our Q4 budget allocations. Please confirm your availability for Thursday at 2:00 PM.\n\nBest regards,\nJohn Smith\nFinance Director"
+    }
+  ],
+  "casual_thread": [
+    {
+      "from_": "mike@startup.io",
+      "to": "user@example.com",
+      "subject": "Quick sync?",
+      "date": "2025-01-10T14:30:00Z",
+      "body": "Hey!\n\nGot a few mins to chat about the project? Nothing urgent, just wanted to bounce some ideas off you.\n\nCheers,\nMike"
+    }
+  ],
+  "multi_message_thread": [
+    {
+      "from_": "sarah@client.com",
+      "to": "user@example.com",
+      "subject": "Project Phoenix Update",
+      "date": "2025-01-08T10:00:00Z",
+      "body": "Hi,\n\nJust checking in on the Project Phoenix timeline. When can we expect the first deliverable?\n\nThanks,\nSarah"
+    },
+    {
+      "from_": "user@example.com",
+      "to": "sarah@client.com",
+      "subject": "Re: Project Phoenix Update",
+      "date": "2025-01-08T11:30:00Z",
+      "body": "Hi Sarah,\n\nWe're on track for delivery by end of next week. I'll send you a preview on Wednesday.\n\nBest,\nUser"
+    },
+    {
+      "from_": "sarah@client.com",
+      "to": "user@example.com",
+      "subject": "Re: Project Phoenix Update",
+      "date": "2025-01-10T09:15:00Z",
+      "body": "Great, looking forward to it! Also, can we reschedule our Friday call to Monday instead?\n\nThanks,\nSarah"
+    }
+  ],
+  "decision_required_thread": [
+    {
+      "from_": "cfo@company.com",
+      "to": "user@example.com",
+      "subject": "Marketing Budget Approval",
+      "date": "2025-01-10T16:00:00Z",
+      "body": "Hi,\n\nWe need to finalize the marketing budget. Please choose one:\n\nOption A: $10,000 for social media campaign\nOption B: $15,000 for mixed media approach\n\nWhich would you prefer?\n\nRegards,\nCFO"
+    }
+  ],
+  "meeting_request_thread": [
+    {
+      "from_": "colleague@company.com",
+      "to": "user@example.com",
+      "subject": "Team Sync",
+      "date": "2025-01-10T11:00:00Z",
+      "body": "Hey,\n\nCan we do a quick team sync tomorrow afternoon? Maybe around 3pm?\n\nThanks!"
+    }
+  ],
+  "simple_acknowledgment_thread": [
+    {
+      "from_": "vendor@supplier.com",
+      "to": "user@example.com",
+      "subject": "Order Confirmation #12345",
+      "date": "2025-01-10T08:00:00Z",
+      "body": "Thank you for your order. Your order #12345 has been confirmed and will be shipped within 2 business days.\n\nBest regards,\nSupplier Team"
+    }
+  ],
+  "noreply_thread": [
+    {
+      "from_": "noreply@newsletter.com",
+      "to": "user@example.com",
+      "subject": "Weekly Newsletter",
+      "date": "2025-01-10T06:00:00Z",
+      "body": "This is an automated newsletter. Please do not reply to this email."
+    }
+  ]
+}

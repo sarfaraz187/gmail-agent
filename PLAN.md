@@ -8,7 +8,7 @@ A **true AI agent** for Gmail that autonomously handles email replies with memor
 - **Decides** if it can auto-reply or needs your input
 - **Remembers** your writing style and preferences
 - **Uses tools** to check calendar, search past emails, lookup contacts
-- **Notifies you** when a decision is required before responding
+- **Labels emails** as "Agent Pending" when your decision is required
 - **Learns** from your corrections to improve over time
 
 ---
@@ -94,14 +94,11 @@ A **true AI agent** for Gmail that autonomously handles email replies with memor
 │       │                     │  → Auto-respond immediately  │            │
 │       │                     │                              │            │
 │       │                     │  Decision required?          │            │
-│       │                     │  → Notify user, wait         │            │
+│       │                     │  → Add "Agent Pending" label │            │
 │       ▼                     └──────────────────────────────┘            │
-│  Gmail sends push                         │                             │
-│  notification instantly                   ▼                             │
-│  (~1-5 seconds)             ┌──────────────────────────────┐            │
-│                             │  NOTIFICATION SYSTEM          │            │
-│                             │  (Telegram / Email / Slack)   │            │
-│                             └──────────────────────────────┘            │
+│  Gmail sends push                                                       │
+│  notification instantly     You check Gmail for "Agent Pending"        │
+│  (~1-5 seconds)             emails when convenient                     │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -145,7 +142,7 @@ A **true AI agent** for Gmail that autonomously handles email replies with memor
 │                                                                          │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
 │  │  Secret Manager                                                  │    │
-│  │  └── OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, etc.                   │    │
+│  │  └── OPENAI_API_KEY, GMAIL_REFRESH_TOKEN, etc.                  │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │                                                                          │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
@@ -187,42 +184,49 @@ A **true AI agent** for Gmail that autonomously handles email replies with memor
                    │                          │
                    ▼                          ▼
            ┌───────────────┐          ┌───────────────┐
-           │  Execute      │          │  Notify User  │
-           │  Tools        │          │  (Telegram)   │
-           │  (calendar,   │          │               │
-           │   search)     │          │  "Sarah asks: │
-           └───────┬───────┘          │   Option A    │
-                   │                  │   or B?"      │
-                   ▼                  └───────┬───────┘
-           ┌───────────────┐                  │
-           │  Generate     │                  ▼
-           │  Draft        │          ┌───────────────┐
-           └───────┬───────┘          │  Wait for     │
-                   │                  │  User Input   │
-                   ▼                  └───────┬───────┘
-           ┌───────────────┐                  │
-           │  SEND EMAIL   │                  ▼
-           │  via Gmail    │          ┌───────────────┐
-           │  API          │          │  User sends   │
-           └───────┬───────┘          │  "Option A"   │
+           │  Execute      │          │  Add label:   │
+           │  Tools        │          │  "Agent       │
+           │  (calendar,   │          │   Pending"    │
+           │   search)     │          └───────┬───────┘
+           └───────┬───────┘                  │
+                   │                          ▼
+                   ▼                  ┌───────────────┐
+           ┌───────────────┐          │  WAIT         │
+           │  Generate     │          │  User checks  │
+           │  Draft        │          │  Gmail later  │
+           └───────┬───────┘          │  and replies  │
                    │                  └───────┬───────┘
                    ▼                          │
-           ┌───────────────┐                  ▼
-           │  Add label:   │          ┌───────────────┐
-           │  "Agent Done" │          │  Generate     │
-           └───────────────┘          │  Response     │
-                                      │  with decision│
-                                      └───────┬───────┘
-                                              │
-                                              ▼
+           ┌───────────────┐                  │
+           │  SEND EMAIL   │          (Manual reply   │
+           │  via Gmail    │           by user for    │
+           │  API          │           MVP - future:  │
+           └───────┬───────┘           agent drafts)  │
+                   │                          │
+                   ▼                          │
+           ┌───────────────┐                  │
+           │  Add label:   │                  │
+           │  "Agent Done" │                  │
+           └───────────────┘                  ▼
                                       ┌───────────────┐
-                                      │  SEND EMAIL   │
+                                      │  Done         │
                                       └───────────────┘
 ```
 
 ---
 
 ## Decision Classification
+
+### Email Processing Rules
+
+| Rule | Behavior |
+|------|----------|
+| **Thread Context** | Always read the FULL email thread (use `threads.get()`), not just the latest message |
+| **Language Matching** | Reply in the SAME language as the incoming email (GPT-4o auto-detects) |
+| **Attachments** | Ignore completely - don't mention or process them |
+| **Auto-Reply Detection** | Never respond to noreply@, mailer-daemon, out-of-office, etc. |
+
+---
 
 ### What the Agent Auto-Handles
 
@@ -280,6 +284,331 @@ ALWAYS_NOTIFY_SENDERS = [
     "ceo@company.com",
     "legal@company.com",
 ]
+
+# NEVER auto-respond to these (skip entirely)
+NEVER_RESPOND_PATTERNS = [
+    r"noreply@",
+    r"no-reply@",
+    r"donotreply@",
+    r"do-not-reply@",
+    r"mailer-daemon@",
+    r"postmaster@",
+    r"^auto-reply",
+    r"out of office",
+    r"automatic reply",
+    r"away from.*office",
+]
+```
+
+---
+
+## Critical Design Decisions
+
+### 1. Gmail Authentication (OAuth2 with Refresh Token)
+
+Since Cloud Run needs to access your Gmail, we use OAuth2 with a stored refresh token.
+
+**How it works:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  ONE-TIME SETUP (Local)                                          │
+│                                                                  │
+│  1. Run auth script locally                                      │
+│  2. Browser opens → You login to Google                         │
+│  3. Grant permissions (read, send, modify labels)               │
+│  4. Script saves refresh_token                                  │
+│  5. Upload refresh_token to Secret Manager                      │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  RUNTIME (Cloud Run)                                             │
+│                                                                  │
+│  1. Cloud Run fetches refresh_token from Secret Manager         │
+│  2. Uses refresh_token to get access_token                      │
+│  3. access_token used for Gmail API calls                       │
+│  4. access_token auto-refreshes (handled by Google SDK)         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Files needed:**
+- `scripts/gmail_auth.py` - One-time OAuth flow
+- Secret Manager: `gmail-refresh-token`
+
+**Required OAuth Scopes:**
+```python
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.labels",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/contacts.readonly",
+]
+```
+
+---
+
+### 2. Watch Renewal (Cloud Scheduler)
+
+Gmail watch expires every 7 days. Cloud Scheduler auto-renews it.
+
+**Setup:**
+```bash
+# Create Cloud Scheduler job
+gcloud scheduler jobs create http gmail-watch-renewal \
+  --location=europe-west1 \
+  --schedule="0 0 */6 * *" \
+  --uri="https://email-agent-xxxxx.run.app/renew-watch" \
+  --http-method=POST \
+  --oidc-service-account-email=SERVICE_ACCOUNT@PROJECT.iam.gserviceaccount.com
+```
+
+**Endpoint:**
+```
+POST /renew-watch
+→ Calls gmail.users().watch() to renew
+→ Returns new expiration date
+```
+
+---
+
+### 3. Idempotency (Gmail Labels)
+
+Pub/Sub may deliver duplicate notifications. We prevent double-processing using Gmail labels.
+
+**Logic:**
+```python
+def should_process_email(email_id: str) -> bool:
+    """Check if email should be processed."""
+    email = gmail.users().messages().get(userId='me', id=email_id).execute()
+    labels = email.get('labelIds', [])
+
+    # Skip if already processed or pending
+    if 'AGENT_DONE' in labels or 'AGENT_PENDING' in labels:
+        return False
+
+    # Only process if has "Agent Respond" label
+    if 'AGENT_RESPOND' not in labels:
+        return False
+
+    return True
+```
+
+**No external database needed** - Gmail itself tracks state.
+
+---
+
+### 4. Error Handling (Logging Only - MVP)
+
+For MVP, errors are logged. Enhanced error handling planned for later.
+
+**Current approach:**
+```python
+try:
+    process_email(email_id)
+except Exception as e:
+    logger.error(f"Failed to process email {email_id}: {e}")
+    # TODO: Add Telegram notification for critical errors
+    # TODO: Add "Agent Error" label to email
+```
+
+**Future enhancements (Post-MVP):**
+- [ ] Retry with exponential backoff
+- [ ] Telegram notification on failure
+- [ ] "Agent Error" label for failed emails
+- [ ] Dead letter queue for persistent failures
+
+---
+
+### 5. Pending Decision Timeout (Logging Only - MVP)
+
+For MVP, pending decisions wait indefinitely. Timeout logic planned for later.
+
+**Current approach:**
+- Agent adds "Agent Pending" label
+- Waits for user to check Gmail and respond (no timeout)
+
+**Future enhancements (Post-MVP):**
+- [ ] Reminder after 4 hours
+- [ ] Auto-expire after 24 hours
+- [ ] Mark as "skipped" and notify user
+
+---
+
+### 6. User Preferences (config.yaml)
+
+User preferences stored in a separate YAML file for easy editing.
+
+**File: `config.yaml`**
+```yaml
+user:
+  email: "your@email.com"
+  signature: |
+    Best regards,
+    Mohammed Sarfaraz
+
+preferences:
+  default_tone: "formal"
+
+  # Always ask user before responding to these senders
+  always_notify_senders:
+    - "ceo@company.com"
+    - "legal@company.com"
+
+  # Types of emails to auto-respond without asking
+  auto_respond_types:
+    - "meeting_confirmation"
+    - "simple_acknowledgment"
+    - "scheduling_request"
+```
+
+**Loading in Python:**
+```python
+import yaml
+from pathlib import Path
+
+def load_config() -> dict:
+    config_path = Path("config.yaml")
+    if config_path.exists():
+        return yaml.safe_load(config_path.read_text())
+    return {}
+```
+
+**Why config.yaml (not .env):**
+- Clean separation: secrets in `.env`, preferences in `config.yaml`
+- YAML supports nested structures and lists
+- Easy to edit without touching sensitive credentials
+- Can be version controlled (unlike .env with secrets)
+
+---
+
+### 7. Email Signature (From config.yaml)
+
+Agent appends your signature to all outgoing emails.
+
+**Configuration (config.yaml):**
+```yaml
+user:
+  signature: |
+    Best regards,
+    Mohammed Sarfaraz
+```
+
+**Usage in draft generation:**
+```python
+def generate_email_body(draft: str, config: dict) -> str:
+    signature = config.get("user", {}).get("signature", "")
+    if signature:
+        return f"{draft}\n\n--\n{signature}"
+    return draft
+```
+
+---
+
+### 8. Rate Limiting (Error Handling)
+
+For personal use, rate limits are unlikely to be hit. Handle gracefully if they occur.
+
+**Approach:**
+```python
+from google.api_core.exceptions import ResourceExhausted
+
+try:
+    gmail.users().messages().send(...)
+except ResourceExhausted:
+    logger.warning("Rate limit hit, waiting 60 seconds...")
+    time.sleep(60)
+    # Retry once
+    gmail.users().messages().send(...)
+```
+
+**Future enhancements (if needed):**
+- [ ] Cloud Tasks queue for throttling
+- [ ] Exponential backoff
+
+---
+
+### 9. Notifications (Gmail Labels Only - MVP)
+
+For MVP, no push notifications. Use Gmail labels to track pending decisions.
+
+**MVP Approach:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  DECISION REQUIRED?                                              │
+│                                                                  │
+│  1. Agent adds "Agent Pending" label                            │
+│  2. You check Gmail periodically for "Agent Pending" emails     │
+│  3. You reply manually                                          │
+│  4. You remove "Agent Pending" label (or agent auto-removes)    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Why skip Telegram for MVP:**
+- Simpler architecture (no webhook handling for user responses)
+- No extra bot setup required
+- Gmail already has push notifications on mobile
+- You can filter/star "Agent Pending" emails
+
+**Future enhancement (Post-MVP):**
+- Telegram bot for instant notifications
+- Reply directly from Telegram to provide decisions
+- Agent drafts response with your input
+
+---
+
+### 10. History ID Tracking
+
+Gmail push notifications include a `historyId`. We must track the last processed history ID to avoid missing emails between notifications.
+
+**Storage:** Firestore (simple key-value)
+
+**Logic:**
+```python
+def get_new_emails_since_last_check(history_id: int) -> list:
+    """Fetch emails changed since last known history ID."""
+    # Get last processed history ID from Firestore
+    last_history_id = firestore.get("last_history_id") or history_id
+
+    # Fetch history changes
+    history = gmail.users().history().list(
+        userId='me',
+        startHistoryId=last_history_id,
+        labelId='AGENT_RESPOND'
+    ).execute()
+
+    # Update stored history ID
+    firestore.set("last_history_id", history_id)
+
+    # Return new message IDs
+    return extract_new_message_ids(history)
+```
+
+**Why this matters:**
+- Pub/Sub notifications only say "something changed" with a historyId
+- Without tracking, you might miss emails if multiple arrive quickly
+- Gmail's history API lets you catch up on any missed changes
+
+---
+
+### 11. Thread Replies (Automatic)
+
+Replies are automatically threaded correctly using Gmail API.
+
+**Implementation:**
+```python
+def create_reply(original_message: dict, reply_body: str) -> dict:
+    """Create a properly threaded reply."""
+    return {
+        "threadId": original_message["threadId"],
+        "raw": create_message_raw(
+            to=extract_sender(original_message),
+            subject=f"Re: {original_message['subject']}",
+            body=reply_body,
+            in_reply_to=original_message["Message-ID"],
+            references=original_message["Message-ID"],
+        )
+    }
 ```
 
 ---
@@ -294,10 +623,10 @@ ALWAYS_NOTIFY_SENDERS = [
 | Validation | Pydantic | Request/response models |
 | **Agent Framework** | **LangGraph** | State machine, planning, tools |
 | LLM Provider | OpenAI GPT-4o | Draft generation, reasoning |
-| **Vector Store** | **ChromaDB** | Memory: style learning |
+| **Vector Store** | **ChromaDB** (future) | Memory: style learning |
 | **Event Trigger** | **Cloud Pub/Sub** | Gmail push notifications |
 | **Hosting** | **Cloud Run** | Serverless container |
-| **Notifications** | **Telegram Bot** | Decision requests to user |
+| **Notifications** | Gmail Labels (MVP) | "Agent Pending" for decisions |
 | Gmail Integration | Gmail API | Watch, read, send emails |
 | Calendar | Google Calendar API | Check availability |
 | Contacts | Google People API | Contact lookup |
@@ -349,11 +678,6 @@ email_agent/
 │       │   ├── contacts.py
 │       │   └── gmail.py            # NEW: Gmail send/label
 │       │
-│       ├── notifications/          # NEW: Notification system
-│       │   ├── __init__.py
-│       │   ├── telegram.py         # Telegram bot
-│       │   ├── email_notify.py     # Email notifications
-│       │   └── handler.py          # User response handler
 │       │
 │       ├── memory/
 │       │   ├── __init__.py
@@ -430,31 +754,6 @@ Receives Pub/Sub push notifications from Gmail.
 
 ---
 
-### Webhook: POST /webhook/telegram
-
-Receives user decisions from Telegram.
-
-**Request:**
-```json
-{
-  "update_id": 123456789,
-  "message": {
-    "text": "Option A",
-    "chat": { "id": 123456 },
-    "reply_to_message": {
-      "text": "Sarah asks: Option A or B for the budget?"
-    }
-  }
-}
-```
-
-**Agent then:**
-1. Matches to pending decision
-2. Generates response with user's choice
-3. Sends email via Gmail API
-
----
-
 ### Endpoint: POST /generate-draft (Manual)
 
 Still works for Gmail Add-on (manual button click).
@@ -518,7 +817,64 @@ Check agent status and pending decisions.
 
 ---
 
-### Phase 5: GCP Deployment Setup
+### Phase 5: Testing Setup ✅ COMPLETED
+**Goal:** Comprehensive test coverage before deployment
+
+**Tasks:**
+- [x] Add test dependencies to pyproject.toml
+- [x] Create test configuration (conftest.py)
+- [x] Create sample email fixtures
+- [x] Unit tests for tone detector
+- [x] Unit tests for draft generator
+- [ ] Unit tests for decision classifier (when built)
+- [x] API endpoint tests (health, generate-draft)
+- [x] Mock external services (OpenAI, Gmail API)
+
+**Results:** 24 tests passing, 100% code coverage
+
+**Dependencies:**
+```toml
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "httpx>=0.27.0",
+    "respx>=0.21.0",
+]
+```
+
+**Test Structure:**
+```
+tests/
+├── __init__.py
+├── conftest.py              # Shared fixtures
+├── fixtures/
+│   └── sample_emails.json   # Test email data
+├── unit/
+│   ├── __init__.py
+│   ├── test_tone_detector.py
+│   └── test_draft_generator.py
+└── api/
+    ├── __init__.py
+    └── test_routes.py
+```
+
+**Run Tests:**
+```bash
+# Run all tests
+uv run pytest
+
+# With coverage
+uv run pytest --cov=src/email_agent --cov-report=html
+
+# Run specific test file
+uv run pytest tests/unit/test_tone_detector.py -v
+```
+
+---
+
+### Phase 6: GCP Deployment
 **Goal:** Deploy to Cloud Run with proper infrastructure
 
 **Tasks:**
@@ -526,7 +882,15 @@ Check agent status and pending decisions.
 - [ ] Set up Artifact Registry for container images
 - [ ] Create Cloud Run service
 - [ ] Configure Secret Manager for API keys
+- [ ] Create OAuth2 credentials in GCP Console
+- [ ] Run `scripts/gmail_auth.py` locally to get refresh token
+- [ ] Store refresh token in Secret Manager
 - [ ] Set up custom domain (optional)
+
+**New Files:**
+- `Dockerfile`
+- `scripts/gmail_auth.py` - OAuth2 flow to get refresh token
+- `src/email_agent/gmail/auth.py` - Load credentials from Secret Manager
 
 **GCP Services:**
 ```bash
@@ -538,12 +902,20 @@ gcloud services enable \
   pubsub.googleapis.com \
   gmail.googleapis.com \
   calendar-json.googleapis.com \
-  people.googleapis.com
+  people.googleapis.com \
+  cloudscheduler.googleapis.com
 ```
+
+**OAuth2 Setup:**
+1. Go to GCP Console → APIs & Services → Credentials
+2. Create OAuth 2.0 Client ID (Desktop app)
+3. Download `credentials.json`
+4. Run: `python scripts/gmail_auth.py`
+5. Store refresh token: `gcloud secrets create gmail-refresh-token --data-file=token.json`
 
 ---
 
-### Phase 6: Gmail Push Notifications
+### Phase 7: Gmail Push Notifications
 **Goal:** Event-driven email processing via Pub/Sub
 
 **Tasks:**
@@ -551,14 +923,20 @@ gcloud services enable \
 - [ ] Grant Gmail API publish permissions
 - [ ] Create push subscription to Cloud Run
 - [ ] Implement `/webhook/gmail` endpoint
+- [ ] Implement `/renew-watch` endpoint
 - [ ] Set up Gmail watch on "Agent Respond" label
-- [ ] Create watch renewal job (every 7 days)
+- [ ] Create Cloud Scheduler job for watch renewal (every 6 days)
+- [ ] Create Gmail labels: "Agent Respond", "Agent Done", "Agent Pending"
+- [ ] Implement history ID tracking (Firestore) to avoid missing emails
+- [ ] Implement full thread fetching (`threads.get()` instead of `messages.get()`)
 
 **New Files:**
 - `src/email_agent/api/webhook.py`
 - `src/email_agent/gmail/watch.py`
 - `src/email_agent/gmail/client.py`
+- `src/email_agent/gmail/labels.py`
 - `scripts/setup_pubsub.sh`
+- `scripts/setup_scheduler.sh`
 
 **Setup Commands:**
 ```bash
@@ -574,18 +952,28 @@ gcloud pubsub topics add-iam-policy-binding gmail-agent \
 gcloud pubsub subscriptions create gmail-agent-sub \
   --topic=gmail-agent \
   --push-endpoint=https://email-agent-xxxxx.run.app/webhook/gmail
+
+# Create Cloud Scheduler for watch renewal (every 6 days)
+gcloud scheduler jobs create http gmail-watch-renewal \
+  --location=europe-west1 \
+  --schedule="0 0 */6 * *" \
+  --uri="https://email-agent-xxxxx.run.app/renew-watch" \
+  --http-method=POST \
+  --oidc-service-account-email=SERVICE_ACCOUNT@PROJECT.iam.gserviceaccount.com
 ```
 
 ---
 
-### Phase 7: Decision Classification
+### Phase 8: Decision Classification
 **Goal:** Detect when user decision is required
 
 **Tasks:**
 - [ ] Create decision classifier module
 - [ ] Define decision-required patterns
+- [ ] Implement no-reply/auto-reply detection (skip these emails entirely)
 - [ ] Implement classification logic
 - [ ] Add CLASSIFY node to agent graph
+- [ ] Add language detection for response generation
 - [ ] Test with sample emails
 
 **New Files:**
@@ -603,33 +991,25 @@ class DecisionType(Enum):
 
 ---
 
-### Phase 8: Notification System (Telegram)
-**Goal:** Notify user and receive decisions via Telegram
+### Phase 9: Notification System (FUTURE - Post MVP)
+**Goal:** Add push notifications when agent needs decisions
 
-**Tasks:**
-- [ ] Create Telegram bot via BotFather
-- [ ] Implement Telegram notification sender
-- [ ] Implement `/webhook/telegram` endpoint
-- [ ] Create decision queue (pending decisions)
-- [ ] Match user replies to pending decisions
-- [ ] Test full notification flow
+**Status:** SKIPPED FOR MVP - Using Gmail labels instead
 
-**New Files:**
-- `src/email_agent/notifications/telegram.py`
-- `src/email_agent/notifications/handler.py`
+**MVP Approach:**
+- Agent adds "Agent Pending" label to emails needing decisions
+- User checks Gmail for "Agent Pending" emails periodically
+- User replies manually to pending emails
 
-**Telegram Flow:**
-```
-Agent → Telegram Bot → User's Phone
-                            ↓
-                      User replies
-                            ↓
-Telegram → Webhook → Agent → Send Email
-```
+**Future Options (Post-MVP):**
+- [ ] Telegram bot for push notifications
+- [ ] Email notification to separate address
+- [ ] Slack integration
+- [ ] Mobile app notifications
 
 ---
 
-### Phase 9: Gmail Send & Label Management
+### Phase 10: Gmail Send & Label Management
 **Goal:** Agent can send emails and manage labels
 
 **Tasks:**
@@ -654,7 +1034,7 @@ SCOPES = [
 
 ---
 
-### Phase 10: Memory System
+### Phase 11: Memory System
 **Goal:** Persistent memory for style and preferences
 
 **Tasks:**
@@ -669,7 +1049,7 @@ SCOPES = [
 
 ---
 
-### Phase 11: Agent Tools
+### Phase 12: Agent Tools
 **Goal:** Calendar, contacts, email search tools
 
 **Tasks:**
@@ -681,7 +1061,7 @@ SCOPES = [
 
 ---
 
-### Phase 12: LangGraph Agent
+### Phase 13: LangGraph Agent
 **Goal:** Full agent with planning and routing
 
 **Tasks:**
@@ -692,7 +1072,7 @@ SCOPES = [
 
 ---
 
-### Phase 13: Feedback Loop
+### Phase 14: Feedback Loop
 **Goal:** Learn from user corrections
 
 **Tasks:**
@@ -702,7 +1082,7 @@ SCOPES = [
 
 ---
 
-### Phase 14: Advanced Features
+### Phase 15: Advanced Features
 **Goal:** Polish and enhance
 
 **Tasks:**
@@ -716,20 +1096,21 @@ SCOPES = [
 ## Current Status
 
 ```
-Phase 1: Project Setup        [████████████] 100% ✅
-Phase 2: Core Backend         [████████████] 100% ✅
-Phase 3: Basic LLM            [████████████] 100% ✅
-Phase 4: Google Add-on        [████████████] 100% ✅
-Phase 5: GCP Deployment       [░░░░░░░░░░░░]   0%  ← NEXT
-Phase 6: Gmail Push           [░░░░░░░░░░░░]   0%
-Phase 7: Decision Classifier  [░░░░░░░░░░░░]   0%
-Phase 8: Telegram Notify      [░░░░░░░░░░░░]   0%
-Phase 9: Gmail Send/Labels    [░░░░░░░░░░░░]   0%
-Phase 10: Memory System       [░░░░░░░░░░░░]   0%
-Phase 11: Agent Tools         [░░░░░░░░░░░░]   0%
-Phase 12: LangGraph Agent     [░░░░░░░░░░░░]   0%
-Phase 13: Feedback Loop       [░░░░░░░░░░░░]   0%
-Phase 14: Advanced Features   [░░░░░░░░░░░░]   0%
+Phase 1:  Project Setup       [████████████] 100% ✅
+Phase 2:  Core Backend        [████████████] 100% ✅
+Phase 3:  Basic LLM           [████████████] 100% ✅
+Phase 4:  Google Add-on       [████████████] 100% ✅
+Phase 5:  Testing Setup       [████████████] 100% ✅
+Phase 6:  GCP Deployment      [░░░░░░░░░░░░]   0%  ← NEXT
+Phase 7:  Gmail Push          [░░░░░░░░░░░░]   0%
+Phase 8:  Decision Classifier [░░░░░░░░░░░░]   0%
+Phase 9:  Notifications       [──────SKIP──] MVP (future)
+Phase 10: Gmail Send/Labels   [░░░░░░░░░░░░]   0%
+Phase 11: Memory System       [░░░░░░░░░░░░]   0%
+Phase 12: Agent Tools         [░░░░░░░░░░░░]   0%
+Phase 13: LangGraph Agent     [░░░░░░░░░░░░]   0%
+Phase 14: Feedback Loop       [░░░░░░░░░░░░]   0%
+Phase 15: Advanced Features   [░░░░░░░░░░░░]   0%
 ```
 
 ---
@@ -757,7 +1138,7 @@ AGENT EXECUTION:
 TIME: ~3 seconds total
 ```
 
-### Scenario 2: Decision Required (Notify User)
+### Scenario 2: Decision Required (Agent Pending)
 
 ```
 INPUT EMAIL:
@@ -773,24 +1154,18 @@ Which would you prefer?"
 AGENT EXECUTION:
 [ANALYZE] Budget decision, two options, money involved
 [CLASSIFY] → NEEDS_CHOICE (binary choice + money)
-[NOTIFY] Send Telegram message:
-         "📧 Sarah asks about marketing budget:
-          A) $10,000 social media
-          B) $15,000 mixed media
+[LABEL] Add "Agent Pending", remove "Agent Respond"
+[DONE] Agent stops - waiting for user
 
-          Reply A or B"
-[LABEL] Add "Agent Pending"
-[WAIT] ...
+USER LATER:
+- Checks Gmail for "Agent Pending" label
+- Sees Sarah's email needs a decision
+- Replies manually: "Hi Sarah, let's go with Option B..."
+- Removes "Agent Pending" label
 
-USER RESPONDS (via Telegram): "B"
-
-AGENT RESUMES:
-[EXECUTE] No tools needed
-[WRITE] Generate response with choice B
-[SEND] "Hi Sarah, let's go with Option B - the $15,000 mixed media
-        campaign. The broader reach will be valuable. Please proceed
-        with that budget. Thanks!"
-[LABEL] Add "Agent Done", remove "Agent Pending"
+FUTURE ENHANCEMENT:
+- Telegram notification for instant alerts
+- Agent drafts response after user provides choice
 ```
 
 ### Scenario 3: Complex Email (Multiple Tools)
@@ -843,7 +1218,6 @@ AGENT EXECUTION:
 | Cloud Run | $0-10 |
 | Pub/Sub | $0-1 |
 | OpenAI API | $5-20 |
-| Telegram Bot | Free |
 | **Total** | **~$5-30/month** |
 
 ---
@@ -854,7 +1228,6 @@ AGENT EXECUTION:
 - Service account with minimal permissions
 - Gmail watch only on specific label (not all emails)
 - No email content stored long-term
-- Telegram bot only responds to your chat ID
 - Cloud Run with authentication for sensitive endpoints
 - HTTPS everywhere
 
@@ -916,6 +1289,21 @@ curl https://your-agent.run.app/status
 | 2025-01-08 | Initial plan created |
 | 2025-01-11 | Phase 1-4 completed (basic working tool) |
 | 2025-01-11 | Plan upgraded to true AI agent architecture |
-| 2025-01-11 | **Added event-driven architecture with Gmail Push + Pub/Sub** |
-| 2025-01-11 | **Added label-based control ("Agent Respond")** |
-| 2025-01-11 | **Added decision classification and Telegram notifications** |
+| 2025-01-11 | Added event-driven architecture with Gmail Push + Pub/Sub |
+| 2025-01-11 | Added label-based control ("Agent Respond") |
+| 2025-01-11 | Added decision classification and Telegram notifications |
+| 2025-01-11 | **Added Critical Design Decisions section** |
+| 2025-01-11 | **Decided: OAuth2 with Refresh Token for Gmail auth** |
+| 2025-01-11 | **Decided: Cloud Scheduler for watch renewal** |
+| 2025-01-11 | **Decided: Gmail Labels for idempotency** |
+| 2025-01-11 | **Decided: Logging only for error handling (MVP)** |
+| 2025-01-11 | **Decided: Config file for email signature** |
+| 2025-01-11 | **Decided: Skip Telegram for MVP - use Gmail labels only** |
+| 2026-01-11 | **Added: Email Processing Rules (thread context, language, attachments)** |
+| 2026-01-11 | **Added: History ID tracking requirement** |
+| 2026-01-11 | **Added: No-reply/auto-reply detection patterns** |
+| 2026-01-11 | **Rule: Must read FULL email thread before responding** |
+| 2026-01-11 | **Rule: Reply in same language as incoming email** |
+| 2026-01-11 | **Rule: Ignore attachments completely** |
+| 2026-01-11 | **Decided: config.yaml for user preferences (not .env)** |
+| 2026-01-11 | **Phase 5 Completed: Testing Setup (24 tests, 100% coverage)** |
