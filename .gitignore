@@ -2,6 +2,10 @@
 .env
 .env.local
 
+# OAuth credentials (NEVER commit these)
+scripts/credentials.json
+scripts/token.json
+
 # Python
 __pycache__/
 *.py[cod]

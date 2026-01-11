@@ -874,44 +874,50 @@ uv run pytest tests/unit/test_tone_detector.py -v
 
 ---
 
-### Phase 6: GCP Deployment
+### Phase 6: GCP Deployment ✅ COMPLETED
 **Goal:** Deploy to Cloud Run with proper infrastructure
 
 **Tasks:**
-- [ ] Create Dockerfile optimized for Cloud Run
-- [ ] Set up Artifact Registry for container images
-- [ ] Create Cloud Run service
-- [ ] Configure Secret Manager for API keys
-- [ ] Create OAuth2 credentials in GCP Console
-- [ ] Run `scripts/gmail_auth.py` locally to get refresh token
-- [ ] Store refresh token in Secret Manager
-- [ ] Set up custom domain (optional)
+- [x] Create Dockerfile optimized for Cloud Run
+- [x] Set up Artifact Registry for container images
+- [ ] Create Cloud Run service (will be done when deploying)
+- [x] Configure Secret Manager for API keys
+- [x] Create OAuth2 credentials in GCP Console
+- [x] Run `scripts/gmail_auth.py` locally to get refresh token
+- [x] Store refresh token in Secret Manager
+- [ ] Set up custom domain (optional - skipped for MVP)
 
-**New Files:**
-- `Dockerfile`
-- `scripts/gmail_auth.py` - OAuth2 flow to get refresh token
+**New Files Created:**
+- `Dockerfile` - Multi-stage build with UV, optimized for Cloud Run
+- `.dockerignore` - Excludes dev files, tests, secrets from container
+- `scripts/gmail_auth.py` - One-time OAuth2 flow to get refresh token
+- `src/email_agent/gmail/__init__.py` - Gmail module init
 - `src/email_agent/gmail/auth.py` - Load credentials from Secret Manager
 
-**GCP Services:**
-```bash
-# Enable required APIs
-gcloud services enable \
-  run.googleapis.com \
-  artifactregistry.googleapis.com \
-  secretmanager.googleapis.com \
-  pubsub.googleapis.com \
-  gmail.googleapis.com \
-  calendar-json.googleapis.com \
-  people.googleapis.com \
-  cloudscheduler.googleapis.com
-```
+**GCP Resources Created:**
+| Resource | Name | Location |
+|----------|------|----------|
+| Artifact Registry | `email-agent` | europe-west1 |
+| Secret | `openai-api-key` | automatic |
+| Secret | `gmail-refresh-token` | automatic |
 
-**OAuth2 Setup:**
-1. Go to GCP Console → APIs & Services → Credentials
-2. Create OAuth 2.0 Client ID (Desktop app)
-3. Download `credentials.json`
-4. Run: `python scripts/gmail_auth.py`
-5. Store refresh token: `gcloud secrets create gmail-refresh-token --data-file=token.json`
+**GCP APIs Enabled:**
+- run.googleapis.com
+- artifactregistry.googleapis.com
+- secretmanager.googleapis.com
+- pubsub.googleapis.com
+- gmail.googleapis.com
+- calendar-json.googleapis.com
+- people.googleapis.com
+- cloudscheduler.googleapis.com
+
+**OAuth2 Scopes Configured:**
+- `gmail.readonly` - Read emails
+- `gmail.send` - Send emails
+- `gmail.modify` - Modify labels
+- `gmail.labels` - Manage labels
+- `calendar.readonly` - Check availability
+- `contacts.readonly` - Lookup contacts
 
 ---
 
@@ -1101,8 +1107,8 @@ Phase 2:  Core Backend        [████████████] 100% ✅
 Phase 3:  Basic LLM           [████████████] 100% ✅
 Phase 4:  Google Add-on       [████████████] 100% ✅
 Phase 5:  Testing Setup       [████████████] 100% ✅
-Phase 6:  GCP Deployment      [░░░░░░░░░░░░]   0%  ← NEXT
-Phase 7:  Gmail Push          [░░░░░░░░░░░░]   0%
+Phase 6:  GCP Deployment      [████████████] 100% ✅
+Phase 7:  Gmail Push          [░░░░░░░░░░░░]   0%  ← NEXT
 Phase 8:  Decision Classifier [░░░░░░░░░░░░]   0%
 Phase 9:  Notifications       [──────SKIP──] MVP (future)
 Phase 10: Gmail Send/Labels   [░░░░░░░░░░░░]   0%
@@ -1307,3 +1313,11 @@ curl https://your-agent.run.app/status
 | 2026-01-11 | **Rule: Ignore attachments completely** |
 | 2026-01-11 | **Decided: config.yaml for user preferences (not .env)** |
 | 2026-01-11 | **Phase 5 Completed: Testing Setup (24 tests, 100% coverage)** |
+| 2026-01-11 | **Phase 6 Completed: GCP Deployment Setup** |
+| 2026-01-11 | Created Dockerfile (multi-stage with UV) and .dockerignore |
+| 2026-01-11 | Enabled GCP APIs: Cloud Run, Artifact Registry, Secret Manager, Pub/Sub, Calendar, People, Scheduler |
+| 2026-01-11 | Created Artifact Registry repository `email-agent` in europe-west1 |
+| 2026-01-11 | Created `scripts/gmail_auth.py` for OAuth2 flow |
+| 2026-01-11 | Created `src/email_agent/gmail/auth.py` for Secret Manager integration |
+| 2026-01-11 | Configured OAuth2 consent screen and credentials |
+| 2026-01-11 | Stored `openai-api-key` and `gmail-refresh-token` in Secret Manager |
