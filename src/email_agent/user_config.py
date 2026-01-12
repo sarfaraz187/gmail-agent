@@ -26,8 +26,14 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-# Default config path
-DEFAULT_CONFIG_PATH = Path(__file__).parent.parent.parent / "config.yaml"
+# Default config paths to check (in order)
+# When installed as package, __file__ is in venv, so we check multiple locations
+CONFIG_SEARCH_PATHS = [
+    Path("/app/config.yaml"),  # Docker/Cloud Run location
+    Path.cwd() / "config.yaml",  # Current working directory
+    Path(__file__).parent.parent.parent / "config.yaml",  # Relative to source
+    Path.home() / ".config" / "email_agent" / "config.yaml",  # User config dir
+]
 
 
 @dataclass
@@ -52,6 +58,31 @@ class UserConfig:
     preferences: UserPreferences = field(default_factory=UserPreferences)
 
 
+def _find_config_file(config_path: Path | str | None = None) -> Path | None:
+    """
+    Find the config.yaml file.
+
+    Args:
+        config_path: Explicit path to use. If None, searches default locations.
+
+    Returns:
+        Path to config file, or None if not found.
+    """
+    if config_path is not None:
+        path = Path(config_path)
+        if path.exists():
+            return path
+        return None
+
+    # Search default locations
+    for path in CONFIG_SEARCH_PATHS:
+        if path.exists():
+            logger.info(f"Found config file at {path}")
+            return path
+
+    return None
+
+
 def load_user_config(config_path: Path | str | None = None) -> UserConfig:
     """
     Load user configuration from config.yaml.
@@ -62,14 +93,14 @@ def load_user_config(config_path: Path | str | None = None) -> UserConfig:
     Returns:
         UserConfig with loaded or default values.
     """
-    if config_path is None:
-        config_path = DEFAULT_CONFIG_PATH
-    else:
-        config_path = Path(config_path)
+    found_path = _find_config_file(config_path)
 
-    if not config_path.exists():
-        logger.warning(f"Config file not found at {config_path}, using defaults")
+    if found_path is None:
+        searched = [str(p) for p in CONFIG_SEARCH_PATHS]
+        logger.warning(f"Config file not found in {searched}, using defaults")
         return UserConfig()
+
+    config_path = found_path
 
     try:
         raw_config = yaml.safe_load(config_path.read_text())
