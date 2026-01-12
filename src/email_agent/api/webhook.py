@@ -13,6 +13,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
+from email_agent.agent import DecisionType, email_classifier
 from email_agent.api.schemas import (
     GmailNotificationData,
     PubSubPushRequest,
@@ -285,24 +286,74 @@ def _process_message(message_id: str, thread_id: str) -> str:
             return "skipped"
 
         # =================================================================
-        # MVP BEHAVIOR: Mark as pending for user review
+        # CLASSIFY EMAIL
         # =================================================================
-        # In future phases, this is where the agent will:
-        # 1. Analyze the email content
-        # 2. Decide if it can auto-respond or needs user input
-        # 3. Generate a draft response
-        # 4. Send the response or mark as pending
-        #
-        # For now, we just mark everything as pending.
+        # Use the classifier to determine if we can auto-respond
+        # or if user input is required.
         # =================================================================
 
         logger.info(
-            f"Processing email from {latest_email.from_email}: "
+            f"Classifying email from {latest_email.from_email}: "
             f"{latest_email.subject[:50]}..."
         )
 
-        # Transition to pending (removes Agent Respond, adds Agent Pending)
-        label_manager.transition_to_pending(message_id)
+        # Build thread context from previous emails
+        thread_context = [email.body for email in thread_emails[:-1]]
+
+        # Classify the email
+        classification = email_classifier.classify(
+            subject=latest_email.subject,
+            body=latest_email.body,
+            sender_email=latest_email.from_email,
+            thread_context=thread_context,
+        )
+
+        # Detect language for future response generation
+        detected_language = email_classifier.detect_language(
+            f"{latest_email.subject}\n{latest_email.body}"
+        )
+
+        logger.info(
+            f"Classification: decision={classification.decision.value}, "
+            f"type={classification.email_type.value}, "
+            f"confidence={classification.confidence:.2f}, "
+            f"language={detected_language}, "
+            f"reason={classification.reason}"
+        )
+
+        # =================================================================
+        # HANDLE BASED ON DECISION TYPE
+        # =================================================================
+        if classification.decision == DecisionType.AUTO_RESPOND:
+            # =============================================================
+            # AUTO-RESPOND PATH
+            # =============================================================
+            # In future phases (Phase 10+), this is where we will:
+            # 1. Execute tools (calendar, contacts, email search)
+            # 2. Generate a draft response
+            # 3. Send the response via Gmail API
+            # 4. Mark as "Agent Done"
+            #
+            # For now, we mark as pending since we can't send yet.
+            # =============================================================
+            logger.info(
+                f"Email classified as AUTO_RESPOND ({classification.email_type.value}). "
+                f"Marking as pending until Phase 10 (Gmail Send) is implemented."
+            )
+            label_manager.transition_to_pending(message_id)
+
+        else:
+            # =============================================================
+            # NEEDS USER INPUT PATH
+            # =============================================================
+            # Decision types: NEEDS_CHOICE, NEEDS_APPROVAL, NEEDS_INPUT
+            # Mark as "Agent Pending" for user to review.
+            # =============================================================
+            logger.info(
+                f"Email requires user input: {classification.decision.value}. "
+                f"Reason: {classification.reason}"
+            )
+            label_manager.transition_to_pending(message_id)
 
         logger.info(f"Marked message {message_id} as Agent Pending")
         return "processed"

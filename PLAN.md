@@ -970,21 +970,22 @@ gcloud scheduler jobs create http gmail-watch-renewal \
 
 ---
 
-### Phase 8: Decision Classification
+### Phase 8: Decision Classification ✅ COMPLETED
 **Goal:** Detect when user decision is required
 
 **Tasks:**
-- [ ] Create decision classifier module
-- [ ] Define decision-required patterns
-- [ ] Implement no-reply/auto-reply detection (skip these emails entirely)
-- [ ] Implement classification logic
-- [ ] Add CLASSIFY node to agent graph
-- [ ] Add language detection for response generation
-- [ ] Test with sample emails
+- [x] Create decision classifier module
+- [x] Define decision-required patterns
+- [x] Implement no-reply/auto-reply detection (already done in Phase 7)
+- [x] Implement classification logic
+- [x] Integrate classifier into webhook.py (CLASSIFY node deferred to Phase 13)
+- [x] Add language detection for response generation
+- [x] Test with sample emails (32 unit tests)
 
-**New Files:**
-- `src/email_agent/agent/classifier.py`
-- `src/email_agent/agent/nodes/classify.py`
+**New Files Created:**
+- `src/email_agent/agent/__init__.py` - Agent module exports
+- `src/email_agent/agent/classifier.py` - Core classification logic
+- `tests/unit/test_classifier.py` - 32 unit tests for classifier
 
 **Decision Categories:**
 ```python
@@ -993,7 +994,32 @@ class DecisionType(Enum):
     NEEDS_CHOICE = "choice"    # User picks A/B/C
     NEEDS_APPROVAL = "approve" # User approves/rejects
     NEEDS_INPUT = "input"      # User provides info
+
+class EmailType(Enum):
+    MEETING_CONFIRMATION = "meeting_confirmation"
+    SIMPLE_ACKNOWLEDGMENT = "simple_acknowledgment"
+    SCHEDULING_REQUEST = "scheduling_request"
+    FOLLOW_UP = "follow_up"
+    INFO_REQUEST = "info_request"
+    UNKNOWN = "unknown"
 ```
+
+**Pattern Categories Implemented:**
+- **Choice patterns:** Option A or B, which one, do you prefer, etc.
+- **Money patterns:** Dollar/Euro/Pound amounts, budget, approve, cost
+- **Commitment patterns:** Deadline, deliver by, commit, promise
+- **Sensitive patterns:** Confidential, urgent, legal, contract
+
+**Auto-Respond Types:**
+- Meeting confirmations
+- Simple acknowledgments
+- Scheduling requests
+- Follow-up emails
+
+**Integration:**
+- Classifier integrated into `webhook.py` `_process_message()` function
+- Emails classified before deciding pending/auto-respond path
+- Language detection added for future multilingual responses
 
 ---
 
@@ -1109,9 +1135,9 @@ Phase 4:  Google Add-on       [████████████] 100% ✅
 Phase 5:  Testing Setup       [████████████] 100% ✅
 Phase 6:  GCP Deployment      [████████████] 100% ✅
 Phase 7:  Gmail Push          [████████████] 100% ✅
-Phase 8:  Decision Classifier [░░░░░░░░░░░░]   0%  ← NEXT
+Phase 8:  Decision Classifier [████████████] 100% ✅
 Phase 9:  Notifications       [──────SKIP──] MVP (future)
-Phase 10: Gmail Send/Labels   [░░░░░░░░░░░░]   0%
+Phase 10: Gmail Send/Labels   [░░░░░░░░░░░░]   0%  ← NEXT
 Phase 11: Memory System       [░░░░░░░░░░░░]   0%
 Phase 12: Agent Tools         [░░░░░░░░░░░░]   0%
 Phase 13: LangGraph Agent     [░░░░░░░░░░░░]   0%
@@ -1329,3 +1355,9 @@ curl https://your-agent.run.app/status
 | 2026-01-12 | Created Gmail labels: Agent Respond, Agent Done, Agent Pending |
 | 2026-01-12 | Fixed: Export history_tracker singleton in storage module |
 | 2026-01-12 | Fixed: Process labelsAdded in webhook (not just messagesAdded) |
+| 2026-01-12 | **Phase 8 Completed: Decision Classification** |
+| 2026-01-12 | Created `src/email_agent/agent/classifier.py` with DecisionType and EmailType enums |
+| 2026-01-12 | Implemented pattern matching for choice, money, commitment, sensitive categories |
+| 2026-01-12 | Added language detection for multilingual response support |
+| 2026-01-12 | Integrated classifier into webhook.py `_process_message()` function |
+| 2026-01-12 | Added 32 unit tests for classifier (115 total tests passing) |
