@@ -55,7 +55,7 @@ AUTO_REPLY_PATTERNS = [
 class EmailData:
     """Parsed email data structure."""
 
-    message_id: str
+    message_id: str  # Gmail's internal API ID
     thread_id: str
     subject: str
     from_email: str
@@ -65,6 +65,7 @@ class EmailData:
     body: str
     snippet: str
     labels: list[str]
+    rfc_message_id: str | None = None  # RFC 2822 Message-ID header (for threading)
     in_reply_to: str | None = None
     references: str | None = None
 
@@ -373,6 +374,7 @@ class GmailClient:
             body=body,
             snippet=message.get("snippet", ""),
             labels=message.get("labelIds", []),
+            rfc_message_id=headers.get("message-id"),  # RFC 2822 Message-ID for threading
             in_reply_to=headers.get("in-reply-to"),
             references=headers.get("references"),
         )

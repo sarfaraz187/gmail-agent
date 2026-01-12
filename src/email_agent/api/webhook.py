@@ -348,14 +348,25 @@ def _process_message(message_id: str, thread_id: str) -> str:
                     latest_email=latest_email,
                 )
 
-                # Send the reply
+                # Build proper References header for threading
+                # References should be: original References + Message-ID of email being replied to
+                references = latest_email.references or ""
+                if latest_email.rfc_message_id:
+                    if references:
+                        references = f"{references} {latest_email.rfc_message_id}"
+                    else:
+                        references = latest_email.rfc_message_id
+
+                # Send the reply with proper threading headers
+                # in_reply_to: The RFC 2822 Message-ID of the email we're replying to
+                # references: Chain of Message-IDs in the thread
                 gmail_client.send_reply(
                     thread_id=thread_id,
                     to=latest_email.from_email,
                     subject=latest_email.subject,
                     body=draft_body,
-                    in_reply_to=latest_email.in_reply_to,
-                    references=latest_email.references,
+                    in_reply_to=latest_email.rfc_message_id,
+                    references=references if references else None,
                 )
 
                 # Transition to Done
