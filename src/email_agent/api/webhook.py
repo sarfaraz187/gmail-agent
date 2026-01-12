@@ -23,7 +23,10 @@ from email_agent.api.schemas import (
 )
 from email_agent.config import settings
 from email_agent.gmail import gmail_client, label_manager, watch_service
+from email_agent.gmail.client import EmailData
+from email_agent.services.draft_generator import draft_generator
 from email_agent.storage import history_tracker
+from email_agent.user_config import append_signature, get_user_config
 
 logger = logging.getLogger(__name__)
 
@@ -328,19 +331,44 @@ def _process_message(message_id: str, thread_id: str) -> str:
             # =============================================================
             # AUTO-RESPOND PATH
             # =============================================================
-            # In future phases (Phase 10+), this is where we will:
-            # 1. Execute tools (calendar, contacts, email search)
-            # 2. Generate a draft response
+            # 1. Generate a draft response using LLM
+            # 2. Append user signature
             # 3. Send the response via Gmail API
             # 4. Mark as "Agent Done"
-            #
-            # For now, we mark as pending since we can't send yet.
             # =============================================================
             logger.info(
                 f"Email classified as AUTO_RESPOND ({classification.email_type.value}). "
-                f"Marking as pending until Phase 10 (Gmail Send) is implemented."
+                f"Generating and sending response..."
             )
-            label_manager.transition_to_pending(message_id)
+
+            try:
+                # Generate the draft
+                draft_body = _generate_auto_response(
+                    thread_emails=thread_emails,
+                    latest_email=latest_email,
+                )
+
+                # Send the reply
+                gmail_client.send_reply(
+                    thread_id=thread_id,
+                    to=latest_email.from_email,
+                    subject=latest_email.subject,
+                    body=draft_body,
+                    in_reply_to=latest_email.in_reply_to,
+                    references=latest_email.references,
+                )
+
+                # Transition to Done
+                label_manager.transition_to_done(message_id)
+                logger.info(f"Successfully auto-responded to message {message_id}")
+                return "processed"
+
+            except Exception as e:
+                logger.error(f"Failed to auto-respond to {message_id}: {e}")
+                # Fall back to pending if auto-respond fails
+                label_manager.transition_to_pending(message_id)
+                logger.info(f"Marked message {message_id} as Agent Pending (auto-respond failed)")
+                return "processed"
 
         else:
             # =============================================================
@@ -354,10 +382,56 @@ def _process_message(message_id: str, thread_id: str) -> str:
                 f"Reason: {classification.reason}"
             )
             label_manager.transition_to_pending(message_id)
-
-        logger.info(f"Marked message {message_id} as Agent Pending")
-        return "processed"
+            logger.info(f"Marked message {message_id} as Agent Pending")
+            return "processed"
 
     except Exception as e:
         logger.exception(f"Error processing message {message_id}: {e}")
         return "skipped"
+
+
+def _generate_auto_response(
+    thread_emails: list[EmailData],
+    latest_email: EmailData,
+) -> str:
+    """
+    Generate an auto-response for the email.
+
+    Uses the draft generator to create a response based on the email
+    thread context and appends the user's signature.
+
+    Args:
+        thread_emails: Full email thread for context.
+        latest_email: The email to respond to.
+
+    Returns:
+        Generated response body with signature.
+    """
+    # Get user config for signature
+    user_config = get_user_config()
+
+    # Convert EmailData objects to dict format expected by draft_generator
+    thread_dicts = [
+        {
+            "from_": email.from_email,
+            "to": email.to_email,
+            "subject": email.subject,
+            "date": email.date,
+            "body": email.body,
+        }
+        for email in thread_emails
+    ]
+
+    # Generate the draft
+    draft_body, detected_tone, confidence = draft_generator.generate_draft(
+        thread=thread_dicts,
+        user_email=user_config.email or latest_email.to_email,
+        subject=latest_email.subject,
+    )
+
+    logger.info(f"Generated draft with tone={detected_tone}, confidence={confidence:.2f}")
+
+    # Append signature
+    final_body = append_signature(draft_body)
+
+    return final_body
