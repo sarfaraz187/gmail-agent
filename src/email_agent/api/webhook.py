@@ -343,8 +343,8 @@ def _process_message(message_id: str, thread_id: str) -> str:
             )
 
             try:
-                # Generate the draft (returns both HTML and plain text)
-                html_body, plain_body = _generate_auto_response(
+                # Generate the draft (returns HTML, plain text, and raw draft)
+                html_body, plain_body, draft_body = _generate_auto_response(
                     thread_emails=thread_emails,
                     latest_email=latest_email,
                 )
@@ -374,6 +374,17 @@ def _process_message(message_id: str, thread_id: str) -> str:
                 # Transition to Done
                 label_manager.transition_to_done(message_id)
                 logger.info(f"Successfully auto-responded to message {message_id}")
+
+                # Learn from sent email (fire-and-forget)
+                thread_context = [email.body for email in thread_emails[:-1]]
+                recipient_name = _extract_name_from_email(latest_email.from_email)
+                _trigger_learning(
+                    sent_body=draft_body,
+                    recipient_email=latest_email.from_email,
+                    recipient_name=recipient_name,
+                    thread_context=thread_context,
+                )
+
                 return "processed"
 
             except Exception as e:
@@ -406,7 +417,7 @@ def _process_message(message_id: str, thread_id: str) -> str:
 def _generate_auto_response(
     thread_emails: list[EmailData],
     latest_email: EmailData,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     """
     Generate an auto-response for the email.
 
@@ -418,7 +429,7 @@ def _generate_auto_response(
         latest_email: The email to respond to.
 
     Returns:
-        Tuple of (html_body, plain_text_body).
+        Tuple of (html_body, plain_text_body, draft_body).
     """
     # Get user config for signature
     user_config = get_user_config()
@@ -435,11 +446,17 @@ def _generate_auto_response(
         for email in thread_emails
     ]
 
+    # Extract recipient name from email (if available)
+    recipient_name = _extract_name_from_email(latest_email.from_email)
+
     # Generate the draft (without signature - we'll add it via formatter)
+    # Pass recipient info for memory-enhanced generation
     draft_body, detected_tone, confidence = draft_generator.generate_draft(
         thread=thread_dicts,
         user_email=user_config.email or latest_email.to_email,
         subject=latest_email.subject,
+        recipient_email=latest_email.from_email,
+        recipient_name=recipient_name,
     )
 
     logger.info(f"Generated draft with tone={detected_tone}, confidence={confidence:.2f}")
@@ -450,4 +467,61 @@ def _generate_auto_response(
         signature_html=user_config.signature_html,
     )
 
-    return html_body, plain_body
+    return html_body, plain_body, draft_body
+
+
+def _extract_name_from_email(from_email: str) -> str:
+    """
+    Extract name from email address if available.
+
+    Handles formats like:
+    - "John Doe <john@example.com>" -> "John Doe"
+    - "john@example.com" -> ""
+
+    Args:
+        from_email: Email address, possibly with name.
+
+    Returns:
+        Extracted name or empty string.
+    """
+    import re
+
+    # Match "Name <email>" pattern
+    match = re.match(r'^"?([^"<]+)"?\s*<', from_email)
+    if match:
+        return match.group(1).strip()
+
+    return ""
+
+
+def _trigger_learning(
+    sent_body: str,
+    recipient_email: str,
+    recipient_name: str,
+    thread_context: list[str],
+) -> None:
+    """
+    Learn from sent email and update contact memory.
+
+    This is fire-and-forget - failures are logged but don't affect
+    the main send flow.
+
+    Args:
+        sent_body: The body of the sent email.
+        recipient_email: Recipient's email address.
+        recipient_name: Recipient's name (if known).
+        thread_context: Previous emails in thread for context.
+    """
+    try:
+        from email_agent.services.style_learner import style_learner
+
+        style_learner.learn_from_sent_email(
+            sent_body=sent_body,
+            recipient_email=recipient_email,
+            recipient_name=recipient_name,
+            thread_context=thread_context,
+        )
+
+    except Exception as e:
+        # Non-critical - log and continue
+        logger.warning(f"Failed to learn from sent email: {e}")
