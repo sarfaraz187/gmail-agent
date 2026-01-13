@@ -9,6 +9,7 @@ import base64
 import logging
 import re
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from dataclasses import dataclass
 
 from googleapiclient.discovery import Resource
@@ -241,6 +242,7 @@ class GmailClient:
         to: str,
         subject: str,
         body: str,
+        html_body: str | None = None,
         in_reply_to: str | None = None,
         references: str | None = None,
     ) -> str:
@@ -251,7 +253,8 @@ class GmailClient:
             thread_id: The thread to reply in.
             to: Recipient email address.
             subject: Email subject (will be prefixed with "Re:" if needed).
-            body: Email body text.
+            body: Plain text email body.
+            html_body: Optional HTML email body. If provided, sends multipart email.
             in_reply_to: Message-ID header of the email being replied to.
             references: References header for threading.
 
@@ -263,9 +266,24 @@ class GmailClient:
             subject = f"Re: {subject}"
 
         # Create the email message
-        message = MIMEText(body)
-        message["to"] = to
-        message["subject"] = subject
+        if html_body:
+            # Multipart email with both HTML and plain text
+            message = MIMEMultipart("alternative")
+            message["to"] = to
+            message["subject"] = subject
+
+            # Attach plain text version first (fallback)
+            text_part = MIMEText(body, "plain", "utf-8")
+            message.attach(text_part)
+
+            # Attach HTML version (preferred)
+            html_part = MIMEText(html_body, "html", "utf-8")
+            message.attach(html_part)
+        else:
+            # Plain text only
+            message = MIMEText(body, "plain", "utf-8")
+            message["to"] = to
+            message["subject"] = subject
 
         # Add threading headers
         if in_reply_to:

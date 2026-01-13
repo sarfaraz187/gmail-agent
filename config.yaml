@@ -2,9 +2,21 @@
 # See PLAN.md for details on each setting
 
 user:
+  name: "Mohammed Sarfaraz"  # Your name for signature
   email: ""  # Your email address (set via environment or override)
+
+  # Plain text signature (fallback)
   signature: |
-    Best regards
+    Best regards,
+    Mohammed Sarfaraz
+
+  # HTML signature (for rich formatting)
+  # Supports full HTML - add links, styling, etc.
+  signature_html: |
+    <p style="margin: 0; color: #333;">
+      Best regards,<br>
+      Mohammed Sarfaraz
+    </p>
 
 preferences:
   default_tone: "professional"

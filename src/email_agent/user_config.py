@@ -53,8 +53,10 @@ class UserPreferences:
 class UserConfig:
     """Complete user configuration from config.yaml."""
 
+    name: str = ""
     email: str = ""
     signature: str = ""
+    signature_html: str = ""
     preferences: UserPreferences = field(default_factory=UserPreferences)
 
 
@@ -122,8 +124,10 @@ def load_user_config(config_path: Path | str | None = None) -> UserConfig:
         )
 
         return UserConfig(
+            name=user_section.get("name", ""),
             email=user_section.get("email", ""),
             signature=user_section.get("signature", "").strip(),
+            signature_html=user_section.get("signature_html", "").strip(),
             preferences=preferences,
         )
 

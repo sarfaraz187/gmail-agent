@@ -25,8 +25,9 @@ from email_agent.config import settings
 from email_agent.gmail import gmail_client, label_manager, watch_service
 from email_agent.gmail.client import EmailData
 from email_agent.services.draft_generator import draft_generator
+from email_agent.services.email_formatter import email_formatter
 from email_agent.storage import history_tracker
-from email_agent.user_config import append_signature, get_user_config
+from email_agent.user_config import get_user_config
 
 logger = logging.getLogger(__name__)
 
@@ -342,8 +343,8 @@ def _process_message(message_id: str, thread_id: str) -> str:
             )
 
             try:
-                # Generate the draft
-                draft_body = _generate_auto_response(
+                # Generate the draft (returns both HTML and plain text)
+                html_body, plain_body = _generate_auto_response(
                     thread_emails=thread_emails,
                     latest_email=latest_email,
                 )
@@ -364,7 +365,8 @@ def _process_message(message_id: str, thread_id: str) -> str:
                     thread_id=thread_id,
                     to=latest_email.from_email,
                     subject=latest_email.subject,
-                    body=draft_body,
+                    body=plain_body,
+                    html_body=html_body,
                     in_reply_to=latest_email.rfc_message_id,
                     references=references if references else None,
                 )
@@ -404,19 +406,19 @@ def _process_message(message_id: str, thread_id: str) -> str:
 def _generate_auto_response(
     thread_emails: list[EmailData],
     latest_email: EmailData,
-) -> str:
+) -> tuple[str, str]:
     """
     Generate an auto-response for the email.
 
     Uses the draft generator to create a response based on the email
-    thread context and appends the user's signature.
+    thread context, then formats as HTML with signature.
 
     Args:
         thread_emails: Full email thread for context.
         latest_email: The email to respond to.
 
     Returns:
-        Generated response body with signature.
+        Tuple of (html_body, plain_text_body).
     """
     # Get user config for signature
     user_config = get_user_config()
@@ -433,7 +435,7 @@ def _generate_auto_response(
         for email in thread_emails
     ]
 
-    # Generate the draft
+    # Generate the draft (without signature - we'll add it via formatter)
     draft_body, detected_tone, confidence = draft_generator.generate_draft(
         thread=thread_dicts,
         user_email=user_config.email or latest_email.to_email,
@@ -442,7 +444,10 @@ def _generate_auto_response(
 
     logger.info(f"Generated draft with tone={detected_tone}, confidence={confidence:.2f}")
 
-    # Append signature
-    final_body = append_signature(draft_body)
+    # Format as HTML with signature
+    html_body, plain_body = email_formatter.format_email(
+        body=draft_body,
+        signature_html=user_config.signature_html,
+    )
 
-    return final_body
+    return html_body, plain_body
