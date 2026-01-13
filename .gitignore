@@ -30,7 +30,6 @@ wheels/
 
 # UV
 .venv/
-uv.lock
 
 # IDE
 .idea/
