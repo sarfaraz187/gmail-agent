@@ -20,7 +20,7 @@ DRAFT_GENERATION_PROMPT = """You are an AI assistant that drafts email replies. 
 3. Is concise and natural-sounding
 4. Does NOT include a subject line
 5. Does NOT include email headers (To, From, etc.)
-6. Does NOT include a signature or sign-off (this will be added automatically)
+6. Does NOT include any signature, sign-off, or closing (this will be added automatically)
 
 User's email: {user_email}
 
@@ -32,7 +32,7 @@ Write a reply to the most recent email. The reply should:
 - Address the content naturally
 - Be written in {tone} tone
 - Be concise (2-4 sentences for simple emails, more if needed for complex topics)
-- Do NOT end with a sign-off like "Best regards" or "Thanks" - the signature is added separately
+- IMPORTANT: End with the last sentence of your message. Do NOT add any closing like "Kind regards", "Best regards", "Thanks", "Cheers", "Sincerely", etc. The signature is added separately.
 
 Draft Reply:"""
 
