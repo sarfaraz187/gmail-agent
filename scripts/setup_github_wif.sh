@@ -80,6 +80,12 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
   --role="roles/iam.serviceAccountUser" \
   --quiet
 
+# Service Account Token Creator - needed for Workload Identity Federation
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:$SERVICE_ACCOUNT_EMAIL" \
+  --role="roles/iam.serviceAccountTokenCreator" \
+  --quiet
+
 # Allow GitHub Actions to impersonate the Service Account
 echo "6. Binding Workload Identity to Service Account..."
 gcloud iam service-accounts add-iam-policy-binding $SERVICE_ACCOUNT_EMAIL \
