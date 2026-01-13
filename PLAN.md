@@ -1082,18 +1082,45 @@ SCOPES = [
 
 ---
 
-### Phase 11: Memory System
+### Phase 11: Memory System ✅ COMPLETED
 **Goal:** Persistent memory for style and preferences
 
 **Tasks:**
-- [ ] Set up ChromaDB or Firestore
-- [ ] Implement style learning
-- [ ] Store contact-specific preferences
-- [ ] Create memory retrieval for drafts
+- [x] Set up Firestore for contact memory storage
+- [x] Implement style learning from sent emails (LLM-based)
+- [x] Store contact-specific preferences (tone, greeting, formality)
+- [x] Create memory retrieval for personalized drafts
+- [x] Add auto-learning trigger after successful sends
+- [x] Configure 6-month TTL for auto-expiration of inactive contacts
+- [x] Add 29 unit tests (154 total tests passing)
 
 **New Files:**
-- `src/email_agent/memory/store.py`
-- `src/email_agent/memory/style_learner.py`
+- `src/email_agent/storage/contact_memory.py` - ContactMemoryStore with Firestore CRUD
+- `src/email_agent/services/style_learner.py` - LLM-based style extraction
+- `tests/storage/test_contact_memory.py` - 18 unit tests
+- `tests/unit/test_style_learner.py` - 11 unit tests
+
+**Modified Files:**
+- `src/email_agent/prompts/templates.py` - Added STYLE_ANALYSIS_PROMPT and DRAFT_GENERATION_PROMPT_WITH_MEMORY
+- `src/email_agent/services/draft_generator.py` - Memory integration with fallback to tone detection
+- `src/email_agent/api/webhook.py` - Learning trigger after successful sends
+- `src/email_agent/storage/__init__.py` - Export contact memory classes
+
+**Data Flow:**
+```
+Email arrives → Check contact memory → Generate personalized draft
+                                              ↓
+                                         Send reply
+                                              ↓
+                                    Learn from sent email → Update memory
+```
+
+**Key Design Decisions:**
+- Firestore in production, local JSON in development (auto-detected via K_SERVICE)
+- Weighted style averaging: 70% existing + 30% new (gradual adaptation)
+- Rolling window of 10 topics per contact (prevents unbounded growth)
+- 6-month TTL auto-expiration via Firestore TTL policy
+- Fire-and-forget learning (non-blocking, failures logged but don't break flow)
 
 ---
 
@@ -1154,8 +1181,8 @@ Phase 7:  Gmail Push          [████████████] 100% ✅
 Phase 8:  Decision Classifier [████████████] 100% ✅
 Phase 9:  Notifications       [──────SKIP──] MVP (future)
 Phase 10: Gmail Send/Labels   [████████████] 100% ✅
-Phase 11: Memory System       [░░░░░░░░░░░░]   0%  ← NEXT
-Phase 12: Agent Tools         [░░░░░░░░░░░░]   0%
+Phase 11: Memory System       [████████████] 100% ✅
+Phase 12: Agent Tools         [░░░░░░░░░░░░]   0%  ← NEXT
 Phase 13: LangGraph Agent     [░░░░░░░░░░░░]   0%
 Phase 14: Feedback Loop       [░░░░░░░░░░░░]   0%
 Phase 15: Advanced Features   [░░░░░░░░░░░░]   0%
@@ -1383,3 +1410,11 @@ curl https://your-agent.run.app/status
 | 2026-01-12 | Added signature appending from config.yaml |
 | 2026-01-12 | Added fallback to "Agent Pending" if auto-respond fails |
 | 2026-01-12 | Added 10 unit tests for user_config (125 total tests passing) |
+| 2026-01-13 | **Phase 11 Completed: Memory System** |
+| 2026-01-13 | Created `src/email_agent/storage/contact_memory.py` - Firestore/local storage |
+| 2026-01-13 | Created `src/email_agent/services/style_learner.py` - LLM-based style extraction |
+| 2026-01-13 | Added STYLE_ANALYSIS_PROMPT and DRAFT_GENERATION_PROMPT_WITH_MEMORY |
+| 2026-01-13 | Integrated memory into draft_generator.py (personalized responses) |
+| 2026-01-13 | Added learning trigger in webhook.py after successful sends |
+| 2026-01-13 | Configured Firestore TTL (6-month auto-expiration) |
+| 2026-01-13 | Added 29 unit tests (154 total tests passing) |
