@@ -42,11 +42,13 @@ class UserPreferences:
 
     default_tone: str = "professional"
     always_notify_senders: list[str] = field(default_factory=list)
-    auto_respond_types: list[str] = field(default_factory=lambda: [
-        "meeting_confirmation",
-        "simple_acknowledgment",
-        "scheduling_request",
-    ])
+    auto_respond_types: list[str] = field(
+        default_factory=lambda: [
+            "meeting_confirmation",
+            "simple_acknowledgment",
+            "scheduling_request",
+        ]
+    )
 
 
 @dataclass
@@ -116,11 +118,14 @@ def load_user_config(config_path: Path | str | None = None) -> UserConfig:
         preferences = UserPreferences(
             default_tone=prefs_section.get("default_tone", "professional"),
             always_notify_senders=prefs_section.get("always_notify_senders", []),
-            auto_respond_types=prefs_section.get("auto_respond_types", [
-                "meeting_confirmation",
-                "simple_acknowledgment",
-                "scheduling_request",
-            ]),
+            auto_respond_types=prefs_section.get(
+                "auto_respond_types",
+                [
+                    "meeting_confirmation",
+                    "simple_acknowledgment",
+                    "scheduling_request",
+                ],
+            ),
         )
 
         return UserConfig(

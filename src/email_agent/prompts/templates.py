@@ -1,5 +1,69 @@
 """Prompt templates for email draft generation."""
 
+# =============================================================================
+# Style Analysis Prompt (for learning from sent emails)
+# =============================================================================
+
+STYLE_ANALYSIS_PROMPT = """Analyze this sent email to extract the writer's style preferences.
+
+Email sent to: {recipient_email}
+Recipient name: {recipient_name}
+
+Email body:
+{sent_body}
+
+Previous thread context (if any):
+{thread_context}
+
+Extract and return as JSON:
+{{
+    "tone": "formal" or "casual",
+    "greeting_used": "the exact greeting used, e.g., 'Hi John,' or 'Dear Mr. Smith,' or empty if none",
+    "formality_score": 0.0 to 1.0 (0 = very casual, 1 = very formal),
+    "response_length": "short" (1-2 sentences), "medium" (3-5 sentences), or "long" (6+ sentences),
+    "topics_discussed": ["list", "of", "main", "topics", "max 3"]
+}}
+
+JSON Response:"""
+
+
+# =============================================================================
+# Memory-Enhanced Draft Generation Prompt
+# =============================================================================
+
+DRAFT_GENERATION_PROMPT_WITH_MEMORY = """You are an AI assistant that drafts email replies. Your task is to write a reply that matches the user's established communication style with this specific contact.
+
+=== USER INFO ===
+User's email: {user_email}
+
+=== RECIPIENT INFO ===
+Recipient: {recipient_name} ({recipient_email})
+
+=== CONTACT MEMORY (learned from past emails) ===
+Preferred tone with this contact: {tone}
+Formality level: {formality_score}/1.0
+Typical greeting: {greeting_preference}
+Response length preference: {response_length}
+Recent topics discussed: {recent_topics}
+
+=== EMAIL THREAD (oldest to newest) ===
+{thread_text}
+
+Write a reply to the most recent email. The reply should:
+- Use greeting style similar to: {greeting_preference} (or appropriate variation)
+- Match the {tone} tone (formality: {formality_score}/1.0)
+- Target {response_length} length
+- Reference relevant prior topics if naturally applicable
+- Address all points in the latest email
+- IMPORTANT: End with the last sentence of your message. Do NOT add any closing like "Kind regards", "Best regards", "Thanks", "Cheers", "Sincerely", etc. The signature is added separately.
+
+Draft Reply:"""
+
+
+# =============================================================================
+# Tone Detection Prompt
+# =============================================================================
+
 TONE_DETECTION_PROMPT = """Analyze the following email messages and determine the overall tone of the conversation.
 
 Email Thread:
