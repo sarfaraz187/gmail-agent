@@ -22,10 +22,14 @@ class TestWebhookGmail:
     @pytest.fixture
     def mock_dependencies(self, mock_settings):
         """Mock all external dependencies."""
+        # Mock at both webhook and node levels since graph nodes import directly
         with patch("email_agent.api.webhook.label_manager") as mock_labels, \
              patch("email_agent.api.webhook.gmail_client") as mock_gmail, \
              patch("email_agent.api.webhook.history_tracker") as mock_history, \
-             patch("email_agent.api.webhook.watch_service") as mock_watch:
+             patch("email_agent.api.webhook.watch_service") as mock_watch, \
+             patch("email_agent.agent.nodes.notify.label_manager", mock_labels), \
+             patch("email_agent.agent.nodes.send.label_manager", mock_labels), \
+             patch("email_agent.agent.nodes.send.gmail_client", mock_gmail):
             yield {
                 "label_manager": mock_labels,
                 "gmail_client": mock_gmail,

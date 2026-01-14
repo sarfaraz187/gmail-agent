@@ -13,7 +13,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from email_agent.agent import DecisionType, email_classifier
+from email_agent.agent import create_initial_state, invoke_graph
 from email_agent.api.schemas import (
     GmailNotificationData,
     PubSubPushRequest,
@@ -23,11 +23,7 @@ from email_agent.api.schemas import (
 )
 from email_agent.config import settings
 from email_agent.gmail import gmail_client, label_manager, watch_service
-from email_agent.gmail.client import EmailData
-from email_agent.services.draft_generator import draft_generator
-from email_agent.services.email_formatter import email_formatter
 from email_agent.storage import history_tracker
-from email_agent.user_config import get_user_config
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +243,7 @@ def _decode_pubsub_message(data: str) -> GmailNotificationData:
 
 def _process_message(message_id: str, thread_id: str) -> str:
     """
-    Process a single email message.
+    Process a single email message using the LangGraph agent.
 
     Args:
         message_id: The Gmail message ID.
@@ -257,7 +253,9 @@ def _process_message(message_id: str, thread_id: str) -> str:
         "processed" if email was processed, "skipped" otherwise.
     """
     try:
-        # Check if already processed (idempotency)
+        # =================================================================
+        # IDEMPOTENCY CHECKS (before invoking graph)
+        # =================================================================
         if label_manager.has_label(message_id, settings.label_agent_done):
             logger.debug(f"Message {message_id} already done, skipping")
             return "skipped"
@@ -266,262 +264,60 @@ def _process_message(message_id: str, thread_id: str) -> str:
             logger.debug(f"Message {message_id} already pending, skipping")
             return "skipped"
 
-        # Fetch the full thread for context
+        # =================================================================
+        # FETCH THREAD
+        # =================================================================
         thread_emails = gmail_client.get_thread(thread_id)
 
         if not thread_emails:
             logger.warning(f"Thread {thread_id} is empty, skipping")
             return "skipped"
 
-        # Get the latest email in the thread
         latest_email = thread_emails[-1]
 
-        # Skip automated senders
+        # =================================================================
+        # PRE-FILTERING (skip automated/auto-reply senders)
+        # =================================================================
         if gmail_client.should_skip_sender(latest_email.from_email):
             logger.info(f"Skipping automated sender: {latest_email.from_email}")
-            # Remove the Agent Respond label since we won't handle it
             label_manager.remove_label(message_id, settings.label_agent_respond)
             return "skipped"
 
-        # Skip auto-replies (out of office, etc.)
         if gmail_client.is_auto_reply(latest_email.subject, latest_email.body):
             logger.info(f"Skipping auto-reply: {latest_email.subject}")
             label_manager.remove_label(message_id, settings.label_agent_respond)
             return "skipped"
 
         # =================================================================
-        # CLASSIFY EMAIL
+        # INVOKE LANGGRAPH AGENT
         # =================================================================
-        # Use the classifier to determine if we can auto-respond
-        # or if user input is required.
-        # =================================================================
-
         logger.info(
-            f"Classifying email from {latest_email.from_email}: "
+            f"Processing email from {latest_email.from_email}: "
             f"{latest_email.subject[:50]}..."
         )
 
-        # Build thread context from previous emails
-        thread_context = [email.body for email in thread_emails[:-1]]
-
-        # Classify the email
-        classification = email_classifier.classify(
-            subject=latest_email.subject,
-            body=latest_email.body,
-            sender_email=latest_email.from_email,
-            thread_context=thread_context,
+        # Create initial state for the graph
+        initial_state = create_initial_state(
+            message_id=message_id,
+            thread_id=thread_id,
+            thread_emails=thread_emails,
+            latest_email=latest_email,
         )
 
-        # Detect language for future response generation
-        detected_language = email_classifier.detect_language(
-            f"{latest_email.subject}\n{latest_email.body}"
-        )
+        # Run the agent graph
+        final_state = invoke_graph(initial_state)
 
-        logger.info(
-            f"Classification: decision={classification.decision.value}, "
-            f"type={classification.email_type.value}, "
-            f"confidence={classification.confidence:.2f}, "
-            f"language={detected_language}, "
-            f"reason={classification.reason}"
-        )
+        # Log the outcome
+        outcome = final_state.get("outcome", "unknown")
+        error_message = final_state.get("error_message")
 
-        # =================================================================
-        # HANDLE BASED ON DECISION TYPE
-        # =================================================================
-        if classification.decision == DecisionType.AUTO_RESPOND:
-            # =============================================================
-            # AUTO-RESPOND PATH
-            # =============================================================
-            # 1. Generate a draft response using LLM
-            # 2. Append user signature
-            # 3. Send the response via Gmail API
-            # 4. Mark as "Agent Done"
-            # =============================================================
-            logger.info(
-                f"Email classified as AUTO_RESPOND ({classification.email_type.value}). "
-                f"Generating and sending response..."
-            )
-
-            try:
-                # Generate the draft (returns HTML, plain text, and raw draft)
-                html_body, plain_body, draft_body = _generate_auto_response(
-                    thread_emails=thread_emails,
-                    latest_email=latest_email,
-                )
-
-                # Build proper References header for threading
-                # References should be: original References + Message-ID of email being replied to
-                references = latest_email.references or ""
-                if latest_email.rfc_message_id:
-                    if references:
-                        references = f"{references} {latest_email.rfc_message_id}"
-                    else:
-                        references = latest_email.rfc_message_id
-
-                # Send the reply with proper threading headers
-                # in_reply_to: The RFC 2822 Message-ID of the email we're replying to
-                # references: Chain of Message-IDs in the thread
-                gmail_client.send_reply(
-                    thread_id=thread_id,
-                    to=latest_email.from_email,
-                    subject=latest_email.subject,
-                    body=plain_body,
-                    html_body=html_body,
-                    in_reply_to=latest_email.rfc_message_id,
-                    references=references if references else None,
-                )
-
-                # Transition to Done
-                label_manager.transition_to_done(message_id)
-                logger.info(f"Successfully auto-responded to message {message_id}")
-
-                # Learn from sent email (fire-and-forget)
-                thread_context = [email.body for email in thread_emails[:-1]]
-                recipient_name = _extract_name_from_email(latest_email.from_email)
-                _trigger_learning(
-                    sent_body=draft_body,
-                    recipient_email=latest_email.from_email,
-                    recipient_name=recipient_name,
-                    thread_context=thread_context,
-                )
-
-                return "processed"
-
-            except Exception as e:
-                logger.error(f"Failed to auto-respond to {message_id}: {e}")
-                # Fall back to pending if auto-respond fails
-                label_manager.transition_to_pending(message_id)
-                logger.info(f"Marked message {message_id} as Agent Pending (auto-respond failed)")
-                return "processed"
-
+        if error_message:
+            logger.warning(f"Agent completed with error: {error_message}")
         else:
-            # =============================================================
-            # NEEDS USER INPUT PATH
-            # =============================================================
-            # Decision types: NEEDS_CHOICE, NEEDS_APPROVAL, NEEDS_INPUT
-            # Mark as "Agent Pending" for user to review.
-            # =============================================================
-            logger.info(
-                f"Email requires user input: {classification.decision.value}. "
-                f"Reason: {classification.reason}"
-            )
-            label_manager.transition_to_pending(message_id)
-            logger.info(f"Marked message {message_id} as Agent Pending")
-            return "processed"
+            logger.info(f"Agent completed: outcome={outcome}")
+
+        return "processed"
 
     except Exception as e:
         logger.exception(f"Error processing message {message_id}: {e}")
         return "skipped"
-
-
-def _generate_auto_response(
-    thread_emails: list[EmailData],
-    latest_email: EmailData,
-) -> tuple[str, str, str]:
-    """
-    Generate an auto-response for the email.
-
-    Uses the draft generator to create a response based on the email
-    thread context, then formats as HTML with signature.
-
-    Args:
-        thread_emails: Full email thread for context.
-        latest_email: The email to respond to.
-
-    Returns:
-        Tuple of (html_body, plain_text_body, draft_body).
-    """
-    # Get user config for signature
-    user_config = get_user_config()
-
-    # Convert EmailData objects to dict format expected by draft_generator
-    thread_dicts = [
-        {
-            "from_": email.from_email,
-            "to": email.to_email,
-            "subject": email.subject,
-            "date": email.date,
-            "body": email.body,
-        }
-        for email in thread_emails
-    ]
-
-    # Extract recipient name from email (if available)
-    recipient_name = _extract_name_from_email(latest_email.from_email)
-
-    # Generate the draft (without signature - we'll add it via formatter)
-    # Pass recipient info for memory-enhanced generation
-    draft_body, detected_tone, confidence = draft_generator.generate_draft(
-        thread=thread_dicts,
-        user_email=user_config.email or latest_email.to_email,
-        subject=latest_email.subject,
-        recipient_email=latest_email.from_email,
-        recipient_name=recipient_name,
-    )
-
-    logger.info(f"Generated draft with tone={detected_tone}, confidence={confidence:.2f}")
-
-    # Format as HTML with signature
-    html_body, plain_body = email_formatter.format_email(
-        body=draft_body,
-        signature_html=user_config.signature_html,
-    )
-
-    return html_body, plain_body, draft_body
-
-
-def _extract_name_from_email(from_email: str) -> str:
-    """
-    Extract name from email address if available.
-
-    Handles formats like:
-    - "John Doe <john@example.com>" -> "John Doe"
-    - "john@example.com" -> ""
-
-    Args:
-        from_email: Email address, possibly with name.
-
-    Returns:
-        Extracted name or empty string.
-    """
-    import re
-
-    # Match "Name <email>" pattern
-    match = re.match(r'^"?([^"<]+)"?\s*<', from_email)
-    if match:
-        return match.group(1).strip()
-
-    return ""
-
-
-def _trigger_learning(
-    sent_body: str,
-    recipient_email: str,
-    recipient_name: str,
-    thread_context: list[str],
-) -> None:
-    """
-    Learn from sent email and update contact memory.
-
-    This is fire-and-forget - failures are logged but don't affect
-    the main send flow.
-
-    Args:
-        sent_body: The body of the sent email.
-        recipient_email: Recipient's email address.
-        recipient_name: Recipient's name (if known).
-        thread_context: Previous emails in thread for context.
-    """
-    try:
-        from email_agent.services.style_learner import style_learner
-
-        style_learner.learn_from_sent_email(
-            sent_body=sent_body,
-            recipient_email=recipient_email,
-            recipient_name=recipient_name,
-            thread_context=thread_context,
-        )
-
-    except Exception as e:
-        # Non-critical - log and continue
-        logger.warning(f"Failed to learn from sent email: {e}")
