@@ -133,13 +133,23 @@ AUTO_RESPOND_PATTERNS: dict[str, list[str]] = {
         r"(wanted\s+to\s+)?(touch\s+base|check\s+in)",
     ],
     "status_update": [
-        # Rejection patterns
+        # Rejection patterns - direct
         r"(unfortunately|regret\s+to\s+inform)",
         r"(not\s+(been\s+)?selected|not\s+moving\s+forward)",
         r"(decided\s+to\s+pursue|chosen\s+to\s+proceed\s+with)\s+other",
         r"(position\s+has\s+been\s+filled|role\s+has\s+been\s+filled)",
         r"(will\s+not\s+be\s+(proceeding|moving\s+forward))",
         r"(after\s+careful\s+consideration)",
+        # Rejection patterns - polite/indirect
+        r"(move\s+forward\s+with\s+other\s+candidates)",
+        r"(pursuing\s+other\s+candidates)",
+        r"(decided\s+to\s+go\s+(in\s+)?a\s+different\s+direction)",
+        r"(not\s+a\s+(good\s+)?fit|not\s+the\s+right\s+fit)",
+        r"(keep\s+your\s+(resume|cv|application)\s+(on\s+file)?)",
+        r"(thank\s+you\s+for\s+(your\s+)?(interest|applying|application))",
+        r"(we\s+appreciate\s+(your\s+)?(time|interest|applying))",
+        r"(wish\s+you\s+(the\s+best|luck|success))",
+        r"(best\s+of\s+luck\s+(in|with)\s+your)",
         # General status/notification patterns
         r"(this\s+is\s+(a\s+)?(to\s+)?(notify|inform|update)\s+you)",
         r"(wanted\s+to\s+let\s+you\s+know)",
