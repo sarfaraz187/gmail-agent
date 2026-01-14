@@ -1124,15 +1124,50 @@ Email arrives → Check contact memory → Generate personalized draft
 
 ---
 
-### Phase 12: Agent Tools
+### Phase 12: Agent Tools ✅ COMPLETED
 **Goal:** Calendar, contacts, email search tools
 
 **Tasks:**
-- [ ] Implement calendar_check tool
-- [ ] Implement search_emails tool
-- [ ] Implement lookup_contact tool
-- [ ] Create tool registry
-- [ ] Integrate with agent graph
+- [x] Implement calendar_check tool
+- [x] Implement search_emails tool
+- [x] Implement lookup_contact tool
+- [x] Create tool registry
+- [ ] Integrate with agent graph (deferred to Phase 13)
+
+**New Files Created:**
+- `src/email_agent/tools/__init__.py` - Tool registry and exports
+- `src/email_agent/tools/base.py` - BaseTool class and ToolResult
+- `src/email_agent/tools/calendar.py` - CalendarCheckTool
+- `src/email_agent/tools/email_search.py` - EmailSearchTool
+- `src/email_agent/tools/contacts.py` - ContactLookupTool
+- `tests/tools/test_base.py` - 11 unit tests
+- `tests/tools/test_calendar.py` - 22 unit tests
+- `tests/tools/test_email_search.py` - 21 unit tests
+- `tests/tools/test_contacts.py` - 24 unit tests
+- `tests/tools/test_registry.py` - 18 unit tests
+
+**Tool Capabilities:**
+
+| Tool | Description | API |
+|------|-------------|-----|
+| `calendar_check` | Check calendar availability | Google Calendar API |
+| `search_emails` | Search past emails | Gmail API |
+| `lookup_contact` | Look up contact info | Google People API |
+
+**Tool Registry Usage:**
+```python
+from email_agent.tools import tool_registry
+
+# Invoke tool by name
+result = tool_registry.invoke("calendar_check", start_date="tomorrow")
+result = tool_registry.invoke("search_emails", query="from:john proposal")
+result = tool_registry.invoke("lookup_contact", query="john@example.com")
+
+# Get tools formatted for LLM function calling
+tools_for_llm = tool_registry.get_tools_for_llm()
+```
+
+**Test Results:** 96 tool tests passing (250 total tests)
 
 ---
 
@@ -1182,8 +1217,8 @@ Phase 8:  Decision Classifier [████████████] 100% ✅
 Phase 9:  Notifications       [──────SKIP──] MVP (future)
 Phase 10: Gmail Send/Labels   [████████████] 100% ✅
 Phase 11: Memory System       [████████████] 100% ✅
-Phase 12: Agent Tools         [░░░░░░░░░░░░]   0%  ← NEXT
-Phase 13: LangGraph Agent     [░░░░░░░░░░░░]   0%
+Phase 12: Agent Tools         [████████████] 100% ✅
+Phase 13: LangGraph Agent     [░░░░░░░░░░░░]   0%  ← NEXT
 Phase 14: Feedback Loop       [░░░░░░░░░░░░]   0%
 Phase 15: Advanced Features   [░░░░░░░░░░░░]   0%
 ```
@@ -1418,3 +1453,10 @@ curl https://your-agent.run.app/status
 | 2026-01-13 | Added learning trigger in webhook.py after successful sends |
 | 2026-01-13 | Configured Firestore TTL (6-month auto-expiration) |
 | 2026-01-13 | Added 29 unit tests (154 total tests passing) |
+| 2026-01-14 | **Phase 12 Completed: Agent Tools** |
+| 2026-01-14 | Created `src/email_agent/tools/base.py` - BaseTool class and ToolResult |
+| 2026-01-14 | Created `src/email_agent/tools/calendar.py` - CalendarCheckTool |
+| 2026-01-14 | Created `src/email_agent/tools/email_search.py` - EmailSearchTool |
+| 2026-01-14 | Created `src/email_agent/tools/contacts.py` - ContactLookupTool |
+| 2026-01-14 | Created `src/email_agent/tools/__init__.py` - ToolRegistry |
+| 2026-01-14 | Added 96 unit tests for tools (250 total tests passing) |
