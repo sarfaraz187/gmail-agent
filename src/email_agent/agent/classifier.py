@@ -44,6 +44,7 @@ class EmailType(Enum):
     SCHEDULING_REQUEST = "scheduling_request"
     FOLLOW_UP = "follow_up"
     INFO_REQUEST = "info_request"
+    STATUS_UPDATE = "status_update"  # Rejections, notifications, status changes
     UNKNOWN = "unknown"
 
 
@@ -131,6 +132,21 @@ AUTO_RESPOND_PATTERNS: dict[str, list[str]] = {
         r"(any\s+update|updates?)\s+(on|about|regarding)",
         r"(wanted\s+to\s+)?(touch\s+base|check\s+in)",
     ],
+    "status_update": [
+        # Rejection patterns
+        r"(unfortunately|regret\s+to\s+inform)",
+        r"(not\s+(been\s+)?selected|not\s+moving\s+forward)",
+        r"(decided\s+to\s+pursue|chosen\s+to\s+proceed\s+with)\s+other",
+        r"(position\s+has\s+been\s+filled|role\s+has\s+been\s+filled)",
+        r"(will\s+not\s+be\s+(proceeding|moving\s+forward))",
+        r"(after\s+careful\s+consideration)",
+        # General status/notification patterns
+        r"(this\s+is\s+(a\s+)?(to\s+)?(notify|inform|update)\s+you)",
+        r"(wanted\s+to\s+let\s+you\s+know)",
+        r"(for\s+your\s+(information|records|reference))",
+        r"(please\s+be\s+(advised|informed))",
+        r"(status\s+update|update\s+on\s+your)",
+    ],
 }
 
 
@@ -188,6 +204,7 @@ class EmailClassifier:
                     "meeting_confirmation",
                     "simple_acknowledgment",
                     "scheduling_request",
+                    "status_update",
                 ],
             }
         }
