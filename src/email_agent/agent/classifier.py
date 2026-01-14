@@ -11,11 +11,12 @@ Classification Categories:
 - NEEDS_INPUT: Ambiguous - needs clarification
 
 The classifier uses:
-1. Pattern matching for decision-required content
-2. User preferences from config.yaml
-3. Email type detection
+1. LLM-based classification (primary) - understands context and nuance
+2. Pattern matching as fallback for decision-required content
+3. User preferences from config.yaml
 """
 
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -23,8 +24,61 @@ from enum import Enum
 from pathlib import Path
 
 import yaml
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
+
+from email_agent.config import settings
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# LLM Classification Prompt
+# =============================================================================
+
+CLASSIFICATION_PROMPT = """You are an email classification assistant. Analyze this email and determine if it can be auto-responded to or requires human input.
+
+=== EMAIL ===
+From: {sender_email}
+Subject: {subject}
+
+Body:
+{body}
+
+=== CLASSIFICATION RULES ===
+
+AUTO_RESPOND (agent can reply automatically):
+- Simple acknowledgments, thank you emails
+- Meeting requests, scheduling inquiries
+- Status updates, notifications, rejection letters
+- Follow-up questions with clear answers
+- Information that just needs a polite acknowledgment
+
+NEEDS_CHOICE (user must pick between options):
+- Email presents multiple options (A/B/C, Option 1/2/3)
+- Asks "which do you prefer" or "what would you like"
+- Requires selecting between alternatives
+
+NEEDS_APPROVAL (user must approve/authorize):
+- Money, budget, pricing decisions
+- Contracts, legal documents, signatures
+- Commitments, deadlines, deliverables
+- Anything involving financial or legal risk
+
+NEEDS_INPUT (ambiguous, needs human review):
+- Complex questions requiring human judgment
+- Sensitive personal matters
+- Unclear intent or context needed
+
+=== RESPONSE FORMAT ===
+Respond with ONLY a JSON object:
+{{
+    "decision": "auto" | "choice" | "approve" | "input",
+    "email_type": "meeting_request" | "acknowledgment" | "status_update" | "scheduling" | "follow_up" | "info_request" | "unknown",
+    "confidence": 0.0-1.0,
+    "reason": "Brief explanation"
+}}
+
+JSON Response:"""
 
 
 class DecisionType(Enum):
@@ -229,6 +283,8 @@ class EmailClassifier:
         """
         Classify an email to determine if auto-response is possible.
 
+        Uses LLM-based classification for accurate understanding of email intent.
+
         Args:
             subject: Email subject.
             body: Email body text.
@@ -238,9 +294,6 @@ class EmailClassifier:
         Returns:
             DecisionResult with classification details.
         """
-        # Normalize text for pattern matching
-        text_to_check = f"{subject}\n{body}".lower()
-
         # 1. Check always_notify_senders first (highest priority)
         always_notify = self.config.get("preferences", {}).get(
             "always_notify_senders", []
@@ -255,20 +308,116 @@ class EmailClassifier:
                 matched_patterns=[],
             )
 
-        # 2. Check for decision-required patterns
+        # 2. Check for high-stakes patterns (money, contracts) - always require approval
+        text_to_check = f"{subject}\n{body}".lower()
         decision_patterns_matched = self._check_decision_patterns(text_to_check)
 
         if decision_patterns_matched:
-            decision_type = self._determine_decision_type(decision_patterns_matched)
-            return DecisionResult(
-                decision=decision_type,
-                email_type=EmailType.UNKNOWN,
-                confidence=0.85,
-                reason=f"Matched decision patterns: {', '.join(decision_patterns_matched.keys())}",
-                matched_patterns=list(decision_patterns_matched.keys()),
-            )
+            # Only block on money/sensitive patterns, not choice patterns
+            if "money" in decision_patterns_matched or "sensitive" in decision_patterns_matched:
+                decision_type = self._determine_decision_type(decision_patterns_matched)
+                return DecisionResult(
+                    decision=decision_type,
+                    email_type=EmailType.UNKNOWN,
+                    confidence=0.85,
+                    reason=f"High-stakes content detected: {', '.join(decision_patterns_matched.keys())}",
+                    matched_patterns=list(decision_patterns_matched.keys()),
+                )
 
-        # 3. Check for auto-respond email types
+        # 3. Use LLM for intelligent classification
+        try:
+            return self._classify_with_llm(subject, body, sender_email)
+        except Exception as e:
+            logger.warning(f"LLM classification failed: {e}, falling back to patterns")
+            return self._classify_with_patterns(text_to_check)
+
+    def _classify_with_llm(
+        self,
+        subject: str,
+        body: str,
+        sender_email: str,
+    ) -> DecisionResult:
+        """
+        Use LLM to classify the email.
+
+        Args:
+            subject: Email subject.
+            body: Email body.
+            sender_email: Sender's email.
+
+        Returns:
+            DecisionResult from LLM analysis.
+        """
+        prompt = CLASSIFICATION_PROMPT.format(
+            sender_email=sender_email,
+            subject=subject,
+            body=body[:2000],  # Limit body length
+        )
+
+        llm = ChatOpenAI(
+            model=settings.openai_model,
+            api_key=settings.openai_api_key,
+            temperature=0.1,  # Low temperature for consistent classification
+        )
+
+        response = llm.invoke([HumanMessage(content=prompt)])
+        response_text = response.content.strip()
+
+        # Parse JSON response
+        if "```json" in response_text:
+            json_start = response_text.find("```json") + 7
+            json_end = response_text.find("```", json_start)
+            response_text = response_text[json_start:json_end].strip()
+        elif "```" in response_text:
+            json_start = response_text.find("```") + 3
+            json_end = response_text.find("```", json_start)
+            response_text = response_text[json_start:json_end].strip()
+
+        result = json.loads(response_text)
+
+        # Map LLM response to our types
+        decision_map = {
+            "auto": DecisionType.AUTO_RESPOND,
+            "choice": DecisionType.NEEDS_CHOICE,
+            "approve": DecisionType.NEEDS_APPROVAL,
+            "input": DecisionType.NEEDS_INPUT,
+        }
+
+        email_type_map = {
+            "meeting_request": EmailType.MEETING_CONFIRMATION,
+            "acknowledgment": EmailType.SIMPLE_ACKNOWLEDGMENT,
+            "status_update": EmailType.STATUS_UPDATE,
+            "scheduling": EmailType.SCHEDULING_REQUEST,
+            "follow_up": EmailType.FOLLOW_UP,
+            "info_request": EmailType.INFO_REQUEST,
+            "unknown": EmailType.UNKNOWN,
+        }
+
+        decision = decision_map.get(result.get("decision", "input"), DecisionType.NEEDS_INPUT)
+        email_type = email_type_map.get(result.get("email_type", "unknown"), EmailType.UNKNOWN)
+        confidence = float(result.get("confidence", 0.8))
+        reason = result.get("reason", "LLM classification")
+
+        logger.info(f"LLM classification: {decision.value}, type={email_type.value}, reason={reason}")
+
+        return DecisionResult(
+            decision=decision,
+            email_type=email_type,
+            confidence=confidence,
+            reason=f"LLM: {reason}",
+            matched_patterns=["llm_classification"],
+        )
+
+    def _classify_with_patterns(self, text_to_check: str) -> DecisionResult:
+        """
+        Fallback pattern-based classification.
+
+        Args:
+            text_to_check: Normalized email text.
+
+        Returns:
+            DecisionResult from pattern matching.
+        """
         email_type, confidence = self._detect_email_type(text_to_check)
 
         auto_respond_types = self.config.get("preferences", {}).get(
@@ -280,11 +429,10 @@ class EmailClassifier:
                 decision=DecisionType.AUTO_RESPOND,
                 email_type=email_type,
                 confidence=confidence,
-                reason=f"Detected as '{email_type.value}' which is in auto_respond_types",
+                reason=f"Pattern match: '{email_type.value}'",
                 matched_patterns=[email_type.value],
             )
 
-        # 4. Default: Need user input for unknown email types
         return DecisionResult(
             decision=DecisionType.NEEDS_INPUT,
             email_type=email_type,
