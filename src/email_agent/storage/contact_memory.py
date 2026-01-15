@@ -4,6 +4,9 @@ Contact memory storage for learning user's writing style per sender.
 Stores writing style preferences and conversation topics per contact.
 Uses Firestore in production and local JSON in development.
 Auto-expires after 6 months of inactivity via Firestore TTL.
+
+Security:
+- Validates email addresses before using as Firestore document IDs
 """
 
 import json
@@ -12,6 +15,8 @@ import os
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from email_agent.security.sanitization import is_safe_firestore_id, sanitize_firestore_id
 
 logger = logging.getLogger(__name__)
 
@@ -132,8 +137,28 @@ class ContactMemoryStore:
         return self._firestore_client
 
     def _normalize_email(self, email: str) -> str:
-        """Normalize email to lowercase for consistent document IDs."""
-        return email.lower().strip()
+        """
+        Normalize email to lowercase for consistent document IDs.
+
+        Also validates the email is safe to use as a Firestore document ID.
+
+        Args:
+            email: Email address to normalize.
+
+        Returns:
+            Normalized and validated email.
+
+        Raises:
+            ValueError: If email cannot be used as document ID.
+        """
+        normalized = email.lower().strip()
+
+        # Validate it's safe for Firestore
+        if not is_safe_firestore_id(normalized):
+            logger.warning(f"Unsafe email for Firestore ID: {email[:50]}")
+            normalized = sanitize_firestore_id(normalized)
+
+        return normalized
 
     def get_contact(self, email: str) -> ContactMemory | None:
         """

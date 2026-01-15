@@ -3,11 +3,15 @@ WRITE node - Draft generation.
 
 Generates the email response using the draft generator.
 Incorporates tool results into the response context.
+
+Security:
+- Sanitizes email content before LLM processing
 """
 
 import logging
 
 from email_agent.agent.state import AgentState
+from email_agent.security.sanitization import sanitize_for_prompt
 from email_agent.services.draft_generator import draft_generator
 from email_agent.services.email_formatter import email_formatter
 from email_agent.tools.base import ToolResult
@@ -23,6 +27,9 @@ def write_node(state: AgentState) -> dict:
     Uses the existing draft_generator and email_formatter.
     Tool results are formatted and included in the generation context.
 
+    Security:
+    - Sanitizes all email content before LLM processing
+
     Args:
         state: Current agent state with tool_results.
 
@@ -37,13 +44,14 @@ def write_node(state: AgentState) -> dict:
     user_config = get_user_config()
 
     # Convert EmailData to dict format for draft_generator
+    # Apply sanitization to prevent prompt injection
     thread_dicts = [
         {
             "from_": email.from_email,
             "to": email.to_email,
-            "subject": email.subject,
+            "subject": sanitize_for_prompt(email.subject, max_length=500),
             "date": email.date,
-            "body": email.body,
+            "body": sanitize_for_prompt(email.body, max_length=10000),
         }
         for email in thread_emails
     ]

@@ -5,13 +5,19 @@ These endpoints handle:
 - POST /webhook/gmail: Receives Pub/Sub push notifications from Gmail
 - POST /renew-watch: Renews Gmail watch (called by Cloud Scheduler)
 - GET /watch-status: Check current watch status
+
+Security:
+- Pub/Sub push authentication via JWT verification
+- Rate limiting via slowapi (configured in main.py)
 """
 
 import base64
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from email_agent.agent import create_initial_state, invoke_graph
 from email_agent.api.schemas import (
@@ -23,6 +29,12 @@ from email_agent.api.schemas import (
 )
 from email_agent.config import settings
 from email_agent.gmail import gmail_client, label_manager, watch_service
+from email_agent.security.pubsub_auth import (
+    PubSubAuthError,
+    is_pubsub_auth_enabled,
+    verify_pubsub_token,
+)
+from email_agent.security.sanitization import redact_sensitive_for_logging
 from email_agent.storage import history_tracker
 
 logger = logging.getLogger(__name__)
@@ -30,30 +42,51 @@ logger = logging.getLogger(__name__)
 # Create router for webhook endpoints
 webhook_router = APIRouter(tags=["webhook"])
 
+# Rate limiter for webhook endpoints
+limiter = Limiter(key_func=get_remote_address)
+
 
 @webhook_router.post("/webhook/gmail", response_model=WebhookAckResponse)
-async def handle_gmail_webhook(request: PubSubPushRequest) -> WebhookAckResponse:
+@limiter.limit("60/minute")  # Allow Pub/Sub retries but prevent abuse
+async def handle_gmail_webhook(
+    request: Request,
+    pubsub_request: PubSubPushRequest,
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> WebhookAckResponse:
     """
     Handle Gmail push notifications via Pub/Sub.
 
     This endpoint is called by Pub/Sub when Gmail detects changes
     to emails with the "Agent Respond" label.
 
+    Security:
+    - Verifies Pub/Sub JWT token in Authorization header (in production)
+    - Rate limited via slowapi middleware
+
     Flow:
-    1. Decode base64 message data
-    2. Fetch history since last check
-    3. Process new emails
-    4. Update stored history ID
-    5. Return 200 to acknowledge
+    1. Verify Pub/Sub authentication token
+    2. Decode base64 message data
+    3. Fetch history since last check
+    4. Process new emails
+    5. Update stored history ID
+    6. Return 200 to acknowledge
 
     IMPORTANT: Return 200 quickly to acknowledge. Pub/Sub will retry
     if we don't respond within the timeout.
     """
-    logger.info(f"Received Gmail webhook, message ID: {request.message.messageId}")
+    # Verify Pub/Sub authentication
+    if is_pubsub_auth_enabled():
+        try:
+            verify_pubsub_token(authorization)
+        except PubSubAuthError as e:
+            logger.warning(f"Pub/Sub authentication failed: {e}")
+            raise HTTPException(status_code=401, detail=str(e))
+
+    logger.info(f"Received Gmail webhook, message ID: {pubsub_request.message.messageId}")
 
     try:
         # 1. Decode the Pub/Sub message
-        notification = _decode_pubsub_message(request.message.data)
+        notification = _decode_pubsub_message(pubsub_request.message.data)
         logger.info(
             f"Gmail notification: email={notification.emailAddress}, "
             f"historyId={notification.historyId}"
@@ -150,7 +183,8 @@ async def handle_gmail_webhook(request: PubSubPushRequest) -> WebhookAckResponse
 
 
 @webhook_router.post("/renew-watch", response_model=RenewWatchResponse)
-async def renew_gmail_watch() -> RenewWatchResponse:
+@limiter.limit("10/minute")  # Prevent abuse - rarely needs to be called
+async def renew_gmail_watch(request: Request) -> RenewWatchResponse:
     """
     Renew the Gmail watch.
 
@@ -158,6 +192,7 @@ async def renew_gmail_watch() -> RenewWatchResponse:
     before it expires (7 days).
 
     Can also be called manually to set up or reset the watch.
+    Rate limited to prevent abuse.
     """
     logger.info("Renewing Gmail watch...")
 
@@ -186,7 +221,8 @@ async def renew_gmail_watch() -> RenewWatchResponse:
 
 
 @webhook_router.get("/watch-status", response_model=WatchStatusResponse)
-async def get_watch_status() -> WatchStatusResponse:
+@limiter.limit("30/minute")
+async def get_watch_status(request: Request) -> WatchStatusResponse:
     """
     Get the current Gmail watch status.
 

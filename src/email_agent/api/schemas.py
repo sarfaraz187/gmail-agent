@@ -2,17 +2,47 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# =============================================================================
+# INPUT SIZE LIMITS (Security)
+# =============================================================================
+
+MAX_EMAIL_SUBJECT_LENGTH = 500
+MAX_EMAIL_BODY_LENGTH = 50000  # 50KB per email
+MAX_EMAIL_ADDRESS_LENGTH = 320  # RFC 5321 limit
+MAX_THREAD_SIZE = 50  # Maximum emails in a thread
 
 
 class EmailMessage(BaseModel):
     """Single email message in a thread."""
 
-    from_: str = Field(..., alias="from", description="Sender email address")
-    to: str = Field(..., description="Recipient email address")
-    date: str = Field(..., description="ISO format date string")
-    subject: str = Field(..., description="Email subject")
-    body: str = Field(..., description="Email body content")
+    from_: str = Field(
+        ...,
+        alias="from",
+        description="Sender email address",
+        max_length=MAX_EMAIL_ADDRESS_LENGTH,
+    )
+    to: str = Field(
+        ...,
+        description="Recipient email address",
+        max_length=MAX_EMAIL_ADDRESS_LENGTH,
+    )
+    date: str = Field(
+        ...,
+        description="ISO format date string",
+        max_length=100,
+    )
+    subject: str = Field(
+        ...,
+        description="Email subject",
+        max_length=MAX_EMAIL_SUBJECT_LENGTH,
+    )
+    body: str = Field(
+        ...,
+        description="Email body content",
+        max_length=MAX_EMAIL_BODY_LENGTH,
+    )
 
     class Config:
         populate_by_name = True
@@ -22,10 +52,28 @@ class GenerateDraftRequest(BaseModel):
     """Request body for generating a draft reply."""
 
     thread: list[EmailMessage] = Field(
-        ..., description="List of email messages in the thread"
+        ...,
+        description="List of email messages in the thread",
+        max_length=MAX_THREAD_SIZE,
     )
-    user_email: str = Field(..., description="Current user's email address")
-    subject: str = Field(..., description="Email thread subject")
+    user_email: str = Field(
+        ...,
+        description="Current user's email address",
+        max_length=MAX_EMAIL_ADDRESS_LENGTH,
+    )
+    subject: str = Field(
+        ...,
+        description="Email thread subject",
+        max_length=MAX_EMAIL_SUBJECT_LENGTH,
+    )
+
+    @field_validator("thread")
+    @classmethod
+    def validate_thread_not_empty(cls, v: list[EmailMessage]) -> list[EmailMessage]:
+        """Ensure thread has at least one message."""
+        if not v:
+            raise ValueError("Thread must contain at least one email")
+        return v
 
 
 class GenerateDraftResponse(BaseModel):

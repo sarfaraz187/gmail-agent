@@ -27,14 +27,18 @@ class TestWebhookGmail:
              patch("email_agent.api.webhook.gmail_client") as mock_gmail, \
              patch("email_agent.api.webhook.history_tracker") as mock_history, \
              patch("email_agent.api.webhook.watch_service") as mock_watch, \
+             patch("email_agent.api.webhook.invoke_graph") as mock_invoke_graph, \
              patch("email_agent.agent.nodes.notify.label_manager", mock_labels), \
              patch("email_agent.agent.nodes.send.label_manager", mock_labels), \
              patch("email_agent.agent.nodes.send.gmail_client", mock_gmail):
+            # Make invoke_graph return a state that indicates pending
+            mock_invoke_graph.return_value = {"outcome": "pending"}
             yield {
                 "label_manager": mock_labels,
                 "gmail_client": mock_gmail,
                 "history_tracker": mock_history,
                 "watch_service": mock_watch,
+                "invoke_graph": mock_invoke_graph,
             }
 
     @pytest.fixture
@@ -99,11 +103,21 @@ class TestWebhookGmail:
         # Mock label checks (not already processed)
         mock_dependencies["label_manager"].has_label.return_value = False
 
-        # Mock thread fetch
+        # Mock thread fetch with complete EmailData-like object
         mock_email = MagicMock()
+        mock_email.message_id = "msg1"
+        mock_email.thread_id = "thread1"
         mock_email.from_email = "john@example.com"
+        mock_email.from_name = "John"
+        mock_email.to_email = "test@gmail.com"
         mock_email.subject = "Test Subject"
         mock_email.body = "Test body"
+        mock_email.snippet = "Test snippet"
+        mock_email.date = "2025-01-11"
+        mock_email.labels = ["INBOX"]
+        mock_email.rfc_message_id = "<msg1@example.com>"
+        mock_email.in_reply_to = None
+        mock_email.references = None
         mock_dependencies["gmail_client"].get_thread.return_value = [mock_email]
         mock_dependencies["gmail_client"].should_skip_sender.return_value = False
         mock_dependencies["gmail_client"].is_auto_reply.return_value = False
@@ -117,8 +131,8 @@ class TestWebhookGmail:
         assert data["processed"] == 1
         assert data["skipped"] == 0
 
-        # Verify transition to pending was called
-        mock_dependencies["label_manager"].transition_to_pending.assert_called_with("msg1")
+        # Verify the agent graph was invoked with the message
+        mock_dependencies["invoke_graph"].assert_called_once()
 
     def test_webhook_skips_already_processed(self, client, mock_dependencies):
         """Test that already processed messages are skipped."""
