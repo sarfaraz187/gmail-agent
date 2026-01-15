@@ -46,28 +46,37 @@ Body:
 
 === CLASSIFICATION RULES ===
 
-AUTO_RESPOND (agent can reply automatically):
+AUTO_RESPOND (agent can reply automatically with polite acknowledgment):
 - Simple acknowledgments, thank you emails
 - Meeting requests, scheduling inquiries
-- Status updates, notifications, rejection letters
 - Follow-up questions with clear answers
 - Information that just needs a polite acknowledgment
+- **JOB REJECTION EMAILS** - When a company informs you that you were not selected,
+  didn't get the job, or they're moving forward with other candidates.
+  These should be auto-responded with a gracious "thank you for your time" message.
+- **Status updates and notifications** - Any email informing you of a decision,
+  outcome, or status change (accepted, rejected, approved, denied, etc.)
+- Newsletters, automated notifications, system alerts
 
 NEEDS_CHOICE (user must pick between options):
-- Email presents multiple options (A/B/C, Option 1/2/3)
+- Email explicitly presents multiple options and asks you to choose
 - Asks "which do you prefer" or "what would you like"
 - Requires selecting between alternatives
 
 NEEDS_APPROVAL (user must approve/authorize):
-- Money, budget, pricing decisions
-- Contracts, legal documents, signatures
-- Commitments, deadlines, deliverables
-- Anything involving financial or legal risk
+- Money, budget, pricing decisions over $1000
+- Contracts, legal documents requiring signature
+- Commitments with deadlines
+- Anything involving significant financial or legal risk
 
-NEEDS_INPUT (ambiguous, needs human review):
-- Complex questions requiring human judgment
+NEEDS_INPUT (truly ambiguous, needs human review):
+- Complex questions that genuinely require human judgment
+- Requests for your opinion or creative input
 - Sensitive personal matters
-- Unclear intent or context needed
+- When you genuinely cannot determine intent
+
+IMPORTANT: If someone is INFORMING you of something (like a rejection), that's AUTO_RESPOND.
+If someone is ASKING you for something complex, that might be NEEDS_INPUT.
 
 === RESPONSE FORMAT ===
 Respond with ONLY a JSON object:
