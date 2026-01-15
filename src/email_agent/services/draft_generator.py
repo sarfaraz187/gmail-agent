@@ -1,6 +1,7 @@
 """Draft generation service using LLM."""
 
 import logging
+import re
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
@@ -15,6 +16,15 @@ from email_agent.services.tone_detector import tone_detector
 from email_agent.storage.contact_memory import contact_memory_store
 
 logger = logging.getLogger(__name__)
+
+# Sign-off patterns to remove (LLM sometimes adds these despite instructions)
+SIGN_OFF_PATTERNS = [
+    r"^(Best regards?|Kind regards?|Warm regards?|Regards),?\s*$",
+    r"^(Sincerely|Yours sincerely|Yours truly),?\s*$",
+    r"^(Thanks?|Thank you|Many thanks),?\s*$",
+    r"^(Cheers|All the best|Best wishes),?\s*$",
+    r"^[A-Z][a-z]+ [A-Z][a-z]+\s*$",  # Standalone name like "Mohammed Sarfaraz"
+]
 
 
 class DraftGenerator:
@@ -95,6 +105,9 @@ class DraftGenerator:
         response = self.llm.invoke([HumanMessage(content=prompt)])
         draft = response.content.strip()
 
+        # Clean up the draft (remove duplicates, sign-offs)
+        draft = self._cleanup_draft(draft)
+
         return draft, tone, confidence
 
     def _generate_with_memory(
@@ -134,10 +147,71 @@ class DraftGenerator:
         response = self.llm.invoke([HumanMessage(content=prompt)])
         draft = response.content.strip()
 
+        # Clean up the draft (remove duplicates, sign-offs)
+        draft = self._cleanup_draft(draft)
+
         # Higher confidence when using memory
         confidence = min(0.9, 0.7 + (style.sample_count * 0.05))
 
         return draft, style.tone, confidence
+
+    def _cleanup_draft(self, draft: str) -> str:
+        """
+        Clean up LLM-generated draft.
+
+        Removes:
+        - Duplicate paragraphs
+        - Sign-off lines (LLM sometimes adds despite instructions)
+        - Trailing whitespace
+
+        Args:
+            draft: Raw draft from LLM.
+
+        Returns:
+            Cleaned draft text.
+        """
+        if not draft:
+            return draft
+
+        lines = draft.strip().split("\n")
+
+        # Remove sign-off lines from the end
+        while lines:
+            last_line = lines[-1].strip()
+            if not last_line:
+                lines.pop()
+                continue
+
+            # Check if last line matches any sign-off pattern
+            is_sign_off = False
+            for pattern in SIGN_OFF_PATTERNS:
+                if re.match(pattern, last_line, re.IGNORECASE):
+                    is_sign_off = True
+                    logger.debug(f"Removing sign-off line: {last_line}")
+                    break
+
+            if is_sign_off:
+                lines.pop()
+            else:
+                break
+
+        # Rejoin and split into paragraphs
+        text = "\n".join(lines).strip()
+        paragraphs = re.split(r"\n\n+", text)
+
+        # Remove duplicate paragraphs (keep first occurrence)
+        seen = set()
+        unique_paragraphs = []
+        for para in paragraphs:
+            # Normalize for comparison (lowercase, strip extra spaces)
+            normalized = " ".join(para.lower().split())
+            if normalized not in seen:
+                seen.add(normalized)
+                unique_paragraphs.append(para)
+            else:
+                logger.debug(f"Removing duplicate paragraph: {para[:50]}...")
+
+        return "\n\n".join(unique_paragraphs)
 
 
 draft_generator = DraftGenerator()
