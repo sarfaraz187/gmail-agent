@@ -53,6 +53,11 @@ class AgentState(TypedDict):
     plain_body: str  # Plain text body (with signature)
 
     # ==========================================================================
+    # DRAFT (set by SAVE_DRAFT node for pending emails)
+    # ==========================================================================
+    draft_id: str | None  # Gmail draft ID if saved for review
+
+    # ==========================================================================
     # OUTCOME (set by SEND or NOTIFY node)
     # ==========================================================================
     outcome: str  # "sent", "pending", "error"
@@ -95,6 +100,8 @@ def create_initial_state(
         draft_body="",
         html_body="",
         plain_body="",
+        # Draft ID (populated by SAVE_DRAFT node for pending emails)
+        draft_id=None,
         # Outcome (populated by SEND or NOTIFY node)
         outcome="",
         error_message=None,

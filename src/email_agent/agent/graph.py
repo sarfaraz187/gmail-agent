@@ -16,6 +16,7 @@ from email_agent.agent.nodes import (
     execute_node,
     write_node,
     send_node,
+    save_draft_node,
     notify_node,
 )
 
@@ -31,33 +32,34 @@ def route_after_classify(state: AgentState) -> str:
     """
     Route based on classification result.
 
-    AUTO_RESPOND -> plan (continue to tool planning)
-    Everything else -> notify (mark as pending)
+    All classifications now go through plan -> write to generate a draft.
+    - AUTO_RESPOND: will eventually send automatically
+    - NEEDS_*: will save draft for user review
 
     Args:
         state: Current agent state.
 
     Returns:
-        Next node name: "plan" or "notify"
+        Next node name: "plan"
     """
     classification = state.get("classification")
 
     if classification is None:
-        logger.warning("No classification result, routing to notify")
-        return "notify"
+        logger.warning("No classification result, routing to plan anyway")
+        return "plan"
 
     if classification.decision == DecisionType.AUTO_RESPOND:
         logger.info(
             f"Classification: AUTO_RESPOND ({classification.email_type.value}), "
             f"routing to plan"
         )
-        return "plan"
     else:
         logger.info(
-            f"Classification: {classification.decision.value}, "
-            f"routing to notify"
+            f"Classification: {classification.decision.value} "
+            f"(will generate draft for review), routing to plan"
         )
-        return "notify"
+
+    return "plan"
 
 
 def route_after_plan(state: AgentState) -> str:
@@ -83,6 +85,35 @@ def route_after_plan(state: AgentState) -> str:
         return "write"
 
 
+def route_after_write(state: AgentState) -> str:
+    """
+    Route based on classification after draft is generated.
+
+    AUTO_RESPOND -> send (send automatically)
+    NEEDS_* -> save_draft (save for user review)
+
+    Args:
+        state: Current agent state.
+
+    Returns:
+        Next node name: "send" or "save_draft"
+    """
+    classification = state.get("classification")
+
+    if classification is None:
+        logger.warning("No classification, routing to save_draft for safety")
+        return "save_draft"
+
+    if classification.decision == DecisionType.AUTO_RESPOND:
+        logger.info("AUTO_RESPOND: routing to send")
+        return "send"
+    else:
+        logger.info(
+            f"{classification.decision.value}: routing to save_draft for user review"
+        )
+        return "save_draft"
+
+
 # =============================================================================
 # GRAPH CONSTRUCTION
 # =============================================================================
@@ -93,9 +124,12 @@ def build_graph() -> StateGraph:
     Build the LangGraph state machine.
 
     Graph structure:
-        CLASSIFY -> (AUTO_RESPOND) -> PLAN -> (has tools) -> EXECUTE -> WRITE -> SEND -> END
-                                           -> (no tools)  -> WRITE -> SEND -> END
-                 -> (NEEDS_INPUT)  -> NOTIFY -> END
+        CLASSIFY -> PLAN -> (has tools) -> EXECUTE -> WRITE -> (AUTO_RESPOND) -> SEND -> END
+                        -> (no tools)  -> WRITE -> (NEEDS_*) -> SAVE_DRAFT -> NOTIFY -> END
+
+    All emails now go through PLAN and WRITE to generate a draft.
+    - AUTO_RESPOND: draft is sent automatically
+    - NEEDS_*: draft is saved for user review, then marked as pending
 
     Returns:
         Compiled StateGraph.
@@ -109,20 +143,14 @@ def build_graph() -> StateGraph:
     builder.add_node("execute", execute_node)
     builder.add_node("write", write_node)
     builder.add_node("send", send_node)
+    builder.add_node("save_draft", save_draft_node)
     builder.add_node("notify", notify_node)
 
     # Set entry point
     builder.set_entry_point("classify")
 
-    # Add conditional edges after classify
-    builder.add_conditional_edges(
-        "classify",
-        route_after_classify,
-        {
-            "plan": "plan",
-            "notify": "notify",
-        },
-    )
+    # Add edge from classify to plan (all emails now go through planning)
+    builder.add_edge("classify", "plan")
 
     # Add conditional edges after plan
     builder.add_conditional_edges(
@@ -134,10 +162,22 @@ def build_graph() -> StateGraph:
         },
     )
 
-    # Add linear edges
+    # Add edge from execute to write
     builder.add_edge("execute", "write")
-    builder.add_edge("write", "send")
+
+    # Add conditional edges after write
+    builder.add_conditional_edges(
+        "write",
+        route_after_write,
+        {
+            "send": "send",
+            "save_draft": "save_draft",
+        },
+    )
+
+    # Add linear edges for final steps
     builder.add_edge("send", END)
+    builder.add_edge("save_draft", "notify")
     builder.add_edge("notify", END)
 
     # Compile the graph

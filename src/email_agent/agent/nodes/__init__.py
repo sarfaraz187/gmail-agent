@@ -9,6 +9,7 @@ from email_agent.agent.nodes.plan import plan_node
 from email_agent.agent.nodes.execute import execute_node
 from email_agent.agent.nodes.write import write_node
 from email_agent.agent.nodes.send import send_node
+from email_agent.agent.nodes.save_draft import save_draft_node
 from email_agent.agent.nodes.notify import notify_node
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "execute_node",
     "write_node",
     "send_node",
+    "save_draft_node",
     "notify_node",
 ]

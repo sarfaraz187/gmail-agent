@@ -18,7 +18,7 @@ def notify_node(state: AgentState) -> dict:
     Mark email as pending for user decision.
 
     Transitions the email from "Agent Respond" to "Agent Pending".
-    User will see this in Gmail and respond manually.
+    User will see this in Gmail and can review the draft in Drafts folder.
 
     Args:
         state: Current agent state.
@@ -28,6 +28,7 @@ def notify_node(state: AgentState) -> dict:
     """
     message_id = state["message_id"]
     classification = state.get("classification")
+    draft_id = state.get("draft_id")
 
     reason = "Unknown"
     if classification:
@@ -38,9 +39,18 @@ def notify_node(state: AgentState) -> dict:
         f"Reason: {reason}"
     )
 
+    if draft_id:
+        logger.info(f"Draft created for review: {draft_id}")
+
     try:
         label_manager.transition_to_pending(message_id)
         logger.info(f"Successfully marked message {message_id} as pending")
+
+        if draft_id:
+            logger.info(
+                f"User can review and send draft from Gmail Drafts folder "
+                f"(draft ID: {draft_id})"
+            )
 
         return {
             "outcome": "pending",

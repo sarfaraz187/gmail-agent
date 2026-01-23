@@ -318,6 +318,93 @@ class GmailClient:
             logger.error(f"Failed to send reply: {e}")
             raise
 
+    def create_draft(
+        self,
+        thread_id: str,
+        to: str,
+        subject: str,
+        body: str,
+        html_body: str | None = None,
+        in_reply_to: str | None = None,
+        references: str | None = None,
+    ) -> str:
+        """
+        Create a draft reply in an existing thread.
+
+        The draft will appear in Gmail's Drafts folder, linked to the thread.
+        User can review, edit, and send manually.
+
+        Args:
+            thread_id: The thread to reply in.
+            to: Recipient email address.
+            subject: Email subject (will be prefixed with "Re:" if needed).
+            body: Plain text email body.
+            html_body: Optional HTML email body. If provided, creates multipart draft.
+            in_reply_to: Message-ID header of the email being replied to.
+            references: References header for threading.
+
+        Returns:
+            The draft ID of the created draft.
+        """
+        # Ensure subject has "Re:" prefix
+        if not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+
+        # Create the email message
+        if html_body:
+            # Multipart email with both HTML and plain text
+            message = MIMEMultipart("alternative")
+            message["to"] = to
+            message["subject"] = subject
+
+            # Attach plain text version first (fallback)
+            text_part = MIMEText(body, "plain", "utf-8")
+            message.attach(text_part)
+
+            # Attach HTML version (preferred)
+            html_part = MIMEText(html_body, "html", "utf-8")
+            message.attach(html_part)
+        else:
+            # Plain text only
+            message = MIMEText(body, "plain", "utf-8")
+            message["to"] = to
+            message["subject"] = subject
+
+        # Add threading headers
+        if in_reply_to:
+            message["In-Reply-To"] = in_reply_to
+        if references:
+            message["References"] = references
+        elif in_reply_to:
+            message["References"] = in_reply_to
+
+        # Encode the message
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+
+        try:
+            result = (
+                self.service.users()
+                .drafts()
+                .create(
+                    userId="me",
+                    body={
+                        "message": {
+                            "raw": raw,
+                            "threadId": thread_id,
+                        }
+                    },
+                )
+                .execute()
+            )
+
+            draft_id = result["id"]
+            logger.info(f"Created draft in thread {thread_id}, draft ID: {draft_id}")
+            return draft_id
+
+        except HttpError as e:
+            logger.error(f"Failed to create draft: {e}")
+            raise
+
     def should_skip_sender(self, sender_email: str) -> bool:
         """
         Check if we should skip responding to this sender.

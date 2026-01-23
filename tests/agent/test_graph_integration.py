@@ -208,7 +208,7 @@ class TestGraphIntegration:
         )
 
     def test_needs_choice_routes_to_notify(self, mock_all_dependencies):
-        """Test that NEEDS_CHOICE routes to notify node."""
+        """Test that NEEDS_CHOICE generates draft and routes to notify node."""
         mocks = mock_all_dependencies
 
         # Setup: Email classified as NEEDS_CHOICE
@@ -221,33 +221,61 @@ class TestGraphIntegration:
         mocks["classifier"].classify.return_value = classification
         mocks["classifier"].detect_language.return_value = "en"
 
-        # Create initial state
-        latest = MockEmailData(
-            subject="Budget decision",
-            body="Should we go with option A ($50k) or option B ($75k)?"
+        # LLM returns no tools needed
+        mock_response = MagicMock()
+        mock_response.content = json.dumps({
+            "reasoning": "User needs to make a choice",
+            "tools": []
+        })
+        mocks["llm"].return_value.invoke.return_value = mock_response
+
+        # Draft generation (draft will be saved for review)
+        mocks["draft_generator"].generate_draft.return_value = (
+            "I'll review the options and get back to you.",
+            "formal",
+            0.85
         )
-        state = create_initial_state(
-            message_id="msg123",
-            thread_id="thread123",
-            thread_emails=[latest],
-            latest_email=latest,
+        mocks["email_formatter"].format_email.return_value = (
+            "<p>I'll review the options and get back to you.</p>",
+            "I'll review the options and get back to you."
         )
 
-        # Execute graph
-        final_state = invoke_graph(state)
+        # Mock save_draft
+        with patch("email_agent.agent.nodes.save_draft.gmail_client") as mock_save_gmail, \
+             patch("email_agent.agent.nodes.save_draft.label_manager"):
+            mock_save_gmail.create_draft.return_value = "draft123"
 
-        # Verify outcome
-        assert final_state["outcome"] == "pending"
-        assert final_state["classification"].decision == DecisionType.NEEDS_CHOICE
+            # Create initial state
+            latest = MockEmailData(
+                subject="Budget decision",
+                body="Should we go with option A ($50k) or option B ($75k)?"
+            )
+            state = create_initial_state(
+                message_id="msg123",
+                thread_id="thread123",
+                thread_emails=[latest],
+                latest_email=latest,
+            )
 
-        # Verify notify was called
-        mocks["notify_label_manager"].transition_to_pending.assert_called_once_with("msg123")
+            # Execute graph
+            final_state = invoke_graph(state)
 
-        # Verify send was NOT called
-        mocks["gmail_client"].send_reply.assert_not_called()
+            # Verify outcome
+            assert final_state["outcome"] == "pending"
+            assert final_state["classification"].decision == DecisionType.NEEDS_CHOICE
+            assert final_state["draft_id"] == "draft123"
+
+            # Verify draft was created
+            mock_save_gmail.create_draft.assert_called_once()
+
+            # Verify notify was called
+            mocks["notify_label_manager"].transition_to_pending.assert_called_once_with("msg123")
+
+            # Verify send was NOT called
+            mocks["gmail_client"].send_reply.assert_not_called()
 
     def test_needs_approval_routes_to_notify(self, mock_all_dependencies):
-        """Test that NEEDS_APPROVAL routes to notify node."""
+        """Test that NEEDS_APPROVAL generates draft and routes to notify node."""
         mocks = mock_all_dependencies
 
         # Setup: Email classified as NEEDS_APPROVAL
@@ -260,24 +288,54 @@ class TestGraphIntegration:
         mocks["classifier"].classify.return_value = classification
         mocks["classifier"].detect_language.return_value = "en"
 
-        # Create initial state
-        latest = MockEmailData(
-            subject="Contract for $100,000",
-            body="Please confirm the contract for $100,000."
+        # LLM returns no tools needed
+        mock_response = MagicMock()
+        mock_response.content = json.dumps({
+            "reasoning": "Needs approval, no tools needed",
+            "tools": []
+        })
+        mocks["llm"].return_value.invoke.return_value = mock_response
+
+        # Draft generation
+        mocks["draft_generator"].generate_draft.return_value = (
+            "Thank you for sending the contract. I will review it.",
+            "formal",
+            0.9
         )
-        state = create_initial_state(
-            message_id="msg123",
-            thread_id="thread123",
-            thread_emails=[latest],
-            latest_email=latest,
+        mocks["email_formatter"].format_email.return_value = (
+            "<p>Thank you for sending the contract. I will review it.</p>",
+            "Thank you for sending the contract. I will review it."
         )
 
-        # Execute graph
-        final_state = invoke_graph(state)
+        # Mock save_draft
+        with patch("email_agent.agent.nodes.save_draft.gmail_client") as mock_save_gmail, \
+             patch("email_agent.agent.nodes.save_draft.label_manager"):
+            mock_save_gmail.create_draft.return_value = "draft456"
 
-        # Verify outcome
-        assert final_state["outcome"] == "pending"
-        mocks["notify_label_manager"].transition_to_pending.assert_called_once()
+            # Create initial state
+            latest = MockEmailData(
+                subject="Contract for $100,000",
+                body="Please confirm the contract for $100,000."
+            )
+            state = create_initial_state(
+                message_id="msg123",
+                thread_id="thread123",
+                thread_emails=[latest],
+                latest_email=latest,
+            )
+
+            # Execute graph
+            final_state = invoke_graph(state)
+
+            # Verify outcome
+            assert final_state["outcome"] == "pending"
+            assert final_state["draft_id"] == "draft456"
+
+            # Verify draft was created
+            mock_save_gmail.create_draft.assert_called_once()
+
+            # Verify notify was called
+            mocks["notify_label_manager"].transition_to_pending.assert_called_once()
 
     def test_send_failure_marks_pending(self, mock_all_dependencies):
         """Test that send failure marks email as pending."""
@@ -331,7 +389,7 @@ class TestGraphRouting:
     def test_graph_has_expected_nodes(self):
         """Verify graph contains all expected nodes."""
         nodes = list(graph.nodes.keys())
-        expected = ["classify", "plan", "execute", "write", "send", "notify", "__start__"]
+        expected = ["classify", "plan", "execute", "write", "send", "save_draft", "notify", "__start__"]
         for node in expected:
             assert node in nodes, f"Missing node: {node}"
 
@@ -351,5 +409,6 @@ class TestGraphRouting:
         assert state["detected_language"] == "en"
         assert state["tools_to_call"] == []
         assert state["tool_results"] == {}
+        assert state["draft_id"] is None
         assert state["outcome"] == ""
         assert state["error_message"] is None
