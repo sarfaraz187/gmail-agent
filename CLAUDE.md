@@ -52,7 +52,7 @@ CLASSIFY → (AUTO_RESPOND) → PLAN → (has tools) → EXECUTE → WRITE → S
 ```
 
 **Nodes (`agent/nodes/`):**
-- `classify` - Runs pattern-based classifier to determine AUTO_RESPOND vs NEEDS_INPUT
+- `classify` - Runs LLM-based classifier (with pattern fallback) to determine AUTO_RESPOND vs NEEDS_INPUT
 - `plan` - LLM decides which tools (calendar, contacts, email_search) to invoke
 - `execute` - Runs the planned tools via `ToolRegistry`
 - `write` - LLM generates draft response using tool results and contact memory
@@ -71,14 +71,16 @@ CLASSIFY → (AUTO_RESPOND) → PLAN → (has tools) → EXECUTE → WRITE → S
 - **`services/draft_generator.py`**: LLM-based draft generation with memory integration.
 - **`gmail/client.py`**: Gmail API wrapper for thread fetching, sending, and label management.
 - **`storage/contact_memory.py`**: Firestore-backed contact memory for style learning.
+- **`security/`**: Pub/Sub JWT authentication (`pubsub_auth.py`) and input sanitization (`sanitization.py`).
 
 ### Classification Logic
 
-The classifier in `agent/classifier.py` uses two pattern sets:
-1. **DECISION_REQUIRED_PATTERNS** - Triggers user review: money, choices, commitments, sensitive topics
-2. **AUTO_RESPOND_PATTERNS** - Safe for auto-reply: meeting requests, acknowledgments, scheduling
+The classifier in `agent/classifier.py` uses LLM-based classification (primary) with pattern fallback:
+1. **LLM Classification** - Primary method; understands context and nuance for accurate intent detection
+2. **DECISION_REQUIRED_PATTERNS** - Fallback patterns that trigger user review: money, contracts, sensitive topics
+3. **AUTO_RESPOND_PATTERNS** - Fallback patterns for auto-reply: meeting requests, acknowledgments, scheduling
 
-Priority: `always_notify_senders` (config) > decision patterns > auto-respond patterns > default to pending
+Priority: `always_notify_senders` (config) > high-stakes patterns (money/sensitive) > LLM classification > pattern fallback > default to pending
 
 ### Configuration
 
