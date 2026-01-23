@@ -124,6 +124,30 @@ class DecisionResult:
 
 
 # =============================================================================
+# Footer/Disclaimer Patterns to Strip
+# =============================================================================
+
+# Common email footer disclaimers that should be ignored during classification
+FOOTER_DISCLAIMER_PATTERNS: list[str] = [
+    # English disclaimers
+    r"this\s+e?-?mail\s+(may\s+)?contain[s]?\s+(confidential|privileged)",
+    r"if\s+you\s+(are\s+)?not\s+the\s+intended\s+recipient",
+    r"(please\s+)?(notify|inform|contact)\s+(the\s+)?sender\s+(immediately)?",
+    r"any\s+unauthori[sz]ed\s+(copying|disclosure|distribution|use)",
+    r"strictly\s+(forbidden|prohibited)",
+    r"(delete|destroy)\s+this\s+(e?-?mail|message)",
+    # German disclaimers
+    r"diese\s+e?-?mail\s+(könnte|kann)\s+vertrauliche",
+    r"wenn\s+sie\s+nicht\s+der\s+(richtige\s+)?adressat",
+    r"informieren\s+sie\s+(bitte\s+)?(sofort\s+)?den\s+absender",
+    r"das\s+unerlaubte\s+kopieren",
+    r"unbefugte\s+weitergabe",
+    # Generic footer markers
+    r"^[-_=]{3,}\s*$",  # Separator lines like "---" or "==="
+    r"(confidentiality\s+notice|disclaimer|legal\s+notice)",
+]
+
+# =============================================================================
 # Pattern Definitions
 # =============================================================================
 
@@ -465,6 +489,27 @@ class EmailClassifier:
 
         return False
 
+    def _strip_footer_disclaimers(self, text: str) -> str:
+        """
+        Remove common email footer disclaimers from text.
+
+        These disclaimers (e.g., "This email may contain confidential...")
+        should not trigger the sensitive content detection.
+
+        Args:
+            text: Email text to clean.
+
+        Returns:
+            Text with footer disclaimers removed.
+        """
+        cleaned_text = text
+
+        for pattern in FOOTER_DISCLAIMER_PATTERNS:
+            # Remove lines that match footer patterns
+            cleaned_text = re.sub(pattern, "", cleaned_text, flags=re.IGNORECASE | re.MULTILINE)
+
+        return cleaned_text
+
     def _check_decision_patterns(self, text: str) -> dict[str, list[str]]:
         """
         Check text against decision-required patterns.
@@ -475,12 +520,15 @@ class EmailClassifier:
         Returns:
             Dict of category -> matched patterns.
         """
+        # Strip footer disclaimers before checking patterns
+        text_without_footers = self._strip_footer_disclaimers(text)
+
         matches: dict[str, list[str]] = {}
 
         for category, patterns in DECISION_REQUIRED_PATTERNS.items():
             category_matches = []
             for pattern in patterns:
-                if re.search(pattern, text, re.IGNORECASE):
+                if re.search(pattern, text_without_footers, re.IGNORECASE):
                     category_matches.append(pattern)
 
             if category_matches:

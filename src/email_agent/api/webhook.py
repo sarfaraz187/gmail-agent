@@ -138,7 +138,7 @@ async def handle_gmail_webhook(
                     continue
                 seen_message_ids.add(message_id)
 
-                result = _process_message(message_id, thread_id)
+                result = _process_message(message_id, thread_id, notification.emailAddress)
                 if result == "processed":
                     processed += 1
                 else:
@@ -163,7 +163,7 @@ async def handle_gmail_webhook(
                     continue
                 seen_message_ids.add(message_id)
 
-                result = _process_message(message_id, thread_id)
+                result = _process_message(message_id, thread_id, notification.emailAddress)
                 if result == "processed":
                     processed += 1
                 else:
@@ -277,13 +277,14 @@ def _decode_pubsub_message(data: str) -> GmailNotificationData:
         raise ValueError(f"Invalid Pub/Sub message data: {e}")
 
 
-def _process_message(message_id: str, thread_id: str) -> str:
+def _process_message(message_id: str, thread_id: str, user_email: str) -> str:
     """
     Process a single email message using the LangGraph agent.
 
     Args:
         message_id: The Gmail message ID.
         thread_id: The Gmail thread ID.
+        user_email: The user's email address (to skip self-sent emails).
 
     Returns:
         "processed" if email was processed, "skipped" otherwise.
@@ -314,6 +315,12 @@ def _process_message(message_id: str, thread_id: str) -> str:
         # =================================================================
         # PRE-FILTERING (skip automated/auto-reply senders)
         # =================================================================
+        # Skip emails sent by the user themselves (prevents replying to own replies)
+        if latest_email.from_email.lower() == user_email.lower():
+            logger.info(f"Skipping self-sent email from: {latest_email.from_email}")
+            label_manager.remove_label(message_id, settings.label_agent_respond)
+            return "skipped"
+
         if gmail_client.should_skip_sender(latest_email.from_email):
             logger.info(f"Skipping automated sender: {latest_email.from_email}")
             label_manager.remove_label(message_id, settings.label_agent_respond)
