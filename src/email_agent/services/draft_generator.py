@@ -26,6 +26,9 @@ SIGN_OFF_PATTERNS = [
     r"^[A-Z][a-z]+ [A-Z][a-z]+\s*$",  # Standalone name like "Mohammed Sarfaraz"
 ]
 
+# Subject line pattern to remove (LLM sometimes adds despite instructions)
+SUBJECT_LINE_PATTERN = r"^Subject:\s*.+$"
+
 
 class DraftGenerator:
     """Generates email draft replies using LLM."""
@@ -160,6 +163,7 @@ class DraftGenerator:
         Clean up LLM-generated draft.
 
         Removes:
+        - Subject lines (LLM sometimes adds despite instructions)
         - Duplicate paragraphs
         - Sign-off lines (LLM sometimes adds despite instructions)
         - Trailing whitespace
@@ -174,6 +178,18 @@ class DraftGenerator:
             return draft
 
         lines = draft.strip().split("\n")
+
+        # Remove subject lines from the beginning
+        while lines:
+            first_line = lines[0].strip()
+            if not first_line:
+                lines.pop(0)
+                continue
+            if re.match(SUBJECT_LINE_PATTERN, first_line, re.IGNORECASE):
+                logger.debug(f"Removing subject line: {first_line}")
+                lines.pop(0)
+            else:
+                break
 
         # Remove sign-off lines from the end
         while lines:

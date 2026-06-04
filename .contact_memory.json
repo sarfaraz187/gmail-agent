@@ -1,0 +1,20 @@
+{
+  "contacts": {
+    "john@example.com": {
+      "email": "john@example.com",
+      "name": "",
+      "style": {
+        "tone": "formal",
+        "greeting_preference": "",
+        "formality_score": 0.5,
+        "avg_response_length": "medium",
+        "sample_count": 2
+      },
+      "topics": [],
+      "created_at": "2026-01-15T10:13:59.013403Z",
+      "updated_at": "2026-01-15T10:14:38.476083Z",
+      "expires_at": "2026-07-14T10:14:38.476093Z",
+      "email_count": 2
+    }
+  }
+}
