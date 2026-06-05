@@ -29,6 +29,7 @@ from email_agent.api.schemas import (
 )
 from email_agent.config import settings
 from email_agent.gmail import gmail_client, label_manager, watch_service
+from email_agent.gmail.client import StaleHistoryError
 from email_agent.security.pubsub_auth import (
     PubSubAuthError,
     is_pubsub_auth_enabled,
@@ -82,7 +83,9 @@ async def handle_gmail_webhook(
             logger.warning(f"Pub/Sub authentication failed: {e}")
             raise HTTPException(status_code=401, detail=str(e))
 
-    logger.info(f"Received Gmail webhook, message ID: {pubsub_request.message.messageId}")
+    logger.info(
+        f"Received Gmail webhook, message ID: {pubsub_request.message.messageId}"
+    )
 
     try:
         # 1. Decode the Pub/Sub message
@@ -95,7 +98,9 @@ async def handle_gmail_webhook(
         # 2. Get the label ID for "Agent Respond"
         respond_label_id = label_manager.get_label_id(settings.label_agent_respond)
         if respond_label_id is None:
-            logger.error("Agent Respond label not found. Run setup_gmail_labels.py first.")
+            logger.error(
+                "Agent Respond label not found. Run setup_gmail_labels.py first."
+            )
             return WebhookAckResponse(status="error", processed=0, skipped=0)
 
         # 3. Get last processed history ID
@@ -114,6 +119,28 @@ async def handle_gmail_webhook(
                 start_history_id=last_history_id,
                 label_id=respond_label_id,
             )
+        except StaleHistoryError:
+            logger.warning(
+                f"Stored history ID {last_history_id} is stale; "
+                "recovering from currently labeled messages"
+            )
+            fallback_messages = gmail_client.list_messages_with_label(
+                label_id=respond_label_id
+            )
+            processed, skipped = _process_message_refs(
+                message_refs=fallback_messages,
+                user_email=notification.emailAddress,
+            )
+            history_tracker.update_history_id(notification.historyId)
+            logger.info(
+                f"Webhook recovered from stale history: "
+                f"processed={processed}, skipped={skipped}"
+            )
+            return WebhookAckResponse(
+                status="recovered",
+                processed=processed,
+                skipped=skipped,
+            )
         except Exception as e:
             logger.error(f"Failed to fetch history: {e}")
             # Still update history ID to avoid getting stuck
@@ -127,24 +154,16 @@ async def handle_gmail_webhook(
 
         for record in history_records:
             # Process newly added messages
-            for msg in record.messages_added:
-                message_id = msg.get("id")
-                thread_id = msg.get("threadId")
-
-                if not message_id or not thread_id:
-                    continue
-
-                if message_id in seen_message_ids:
-                    continue
-                seen_message_ids.add(message_id)
-
-                result = _process_message(message_id, thread_id, notification.emailAddress)
-                if result == "processed":
-                    processed += 1
-                else:
-                    skipped += 1
+            record_processed, record_skipped = _process_message_refs(
+                message_refs=record.messages_added,
+                user_email=notification.emailAddress,
+                seen_message_ids=seen_message_ids,
+            )
+            processed += record_processed
+            skipped += record_skipped
 
             # Process labels added to existing messages
+            label_added_messages = []
             for label_record in record.labels_added:
                 msg = label_record.get("message", {})
                 label_ids = label_record.get("labelIds", [])
@@ -153,21 +172,15 @@ async def handle_gmail_webhook(
                 if respond_label_id not in label_ids:
                     continue
 
-                message_id = msg.get("id")
-                thread_id = msg.get("threadId")
+                label_added_messages.append(msg)
 
-                if not message_id or not thread_id:
-                    continue
-
-                if message_id in seen_message_ids:
-                    continue
-                seen_message_ids.add(message_id)
-
-                result = _process_message(message_id, thread_id, notification.emailAddress)
-                if result == "processed":
-                    processed += 1
-                else:
-                    skipped += 1
+            record_processed, record_skipped = _process_message_refs(
+                message_refs=label_added_messages,
+                user_email=notification.emailAddress,
+                seen_message_ids=seen_message_ids,
+            )
+            processed += record_processed
+            skipped += record_skipped
 
         # 6. Update history ID
         history_tracker.update_history_id(notification.historyId)
@@ -364,3 +377,43 @@ def _process_message(message_id: str, thread_id: str, user_email: str) -> str:
     except Exception as e:
         logger.exception(f"Error processing message {message_id}: {e}")
         return "skipped"
+
+
+def _process_message_refs(
+    message_refs: list[dict],
+    user_email: str,
+    seen_message_ids: set[str] | None = None,
+) -> tuple[int, int]:
+    """
+    Process a list of Gmail message references.
+
+    Args:
+        message_refs: Message dictionaries containing ``id`` and ``threadId``.
+        user_email: The user's Gmail address.
+        seen_message_ids: Optional de-duplication set shared across batches.
+
+    Returns:
+        Tuple of ``(processed, skipped)`` counts.
+    """
+    processed = 0
+    skipped = 0
+    message_ids_seen = seen_message_ids if seen_message_ids is not None else set()
+
+    for message_ref in message_refs:
+        message_id = message_ref.get("id")
+        thread_id = message_ref.get("threadId")
+
+        if not message_id or not thread_id:
+            continue
+
+        if message_id in message_ids_seen:
+            continue
+        message_ids_seen.add(message_id)
+
+        result = _process_message(message_id, thread_id, user_email)
+        if result == "processed":
+            processed += 1
+        else:
+            skipped += 1
+
+    return processed, skipped

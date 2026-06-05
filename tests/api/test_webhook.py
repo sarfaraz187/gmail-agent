@@ -6,6 +6,8 @@ import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
+from email_agent.gmail.client import StaleHistoryError
+
 
 class TestWebhookGmail:
     """Tests for POST /webhook/gmail endpoint."""
@@ -178,6 +180,45 @@ class TestWebhookGmail:
         assert response.status_code == 200
         data = response.json()
         assert data["skipped"] == 1
+
+    def test_webhook_recovers_when_history_id_is_too_old(self, client, mock_dependencies):
+        """Test that stale Gmail history falls back to currently labeled messages."""
+        mock_dependencies["label_manager"].get_label_id.return_value = "Label_123"
+        mock_dependencies["history_tracker"].get_last_history_id.return_value = 12340
+        mock_dependencies["gmail_client"].get_history.side_effect = StaleHistoryError(12340)
+        mock_dependencies["gmail_client"].list_messages_with_label.return_value = [
+            {"id": "msg1", "threadId": "thread1"}
+        ]
+        mock_dependencies["label_manager"].has_label.return_value = False
+
+        mock_email = MagicMock()
+        mock_email.message_id = "msg1"
+        mock_email.thread_id = "thread1"
+        mock_email.from_email = "john@example.com"
+        mock_email.from_name = "John"
+        mock_email.to_email = "test@gmail.com"
+        mock_email.subject = "Test Subject"
+        mock_email.body = "Test body"
+        mock_email.snippet = "Test snippet"
+        mock_email.date = "2025-01-11"
+        mock_email.labels = ["INBOX", "Label_123"]
+        mock_email.rfc_message_id = "<msg1@example.com>"
+        mock_email.in_reply_to = None
+        mock_email.references = None
+
+        mock_dependencies["gmail_client"].get_thread.return_value = [mock_email]
+        mock_dependencies["gmail_client"].should_skip_sender.return_value = False
+        mock_dependencies["gmail_client"].is_auto_reply.return_value = False
+
+        request = self._create_pubsub_request("test@gmail.com", 12350)
+        response = client.post("/webhook/gmail", json=request)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "recovered"
+        assert data["processed"] == 1
+        assert data["skipped"] == 0
+        mock_dependencies["history_tracker"].update_history_id.assert_called_with(12350)
 
     def test_webhook_invalid_base64_returns_error(self, client, mock_dependencies):
         """Test that invalid base64 data is handled gracefully."""

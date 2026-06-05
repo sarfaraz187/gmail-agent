@@ -82,6 +82,14 @@ class HistoryRecord:
     labels_removed: list[dict]
 
 
+class StaleHistoryError(Exception):
+    """Raised when the stored Gmail history ID is too old to query."""
+
+    def __init__(self, start_history_id: int) -> None:
+        super().__init__(f"History ID {start_history_id} is too old")
+        self.start_history_id = start_history_id
+
+
 class GmailClient:
     """
     Gmail API client for email operations.
@@ -174,10 +182,55 @@ class GmailClient:
 
         except HttpError as e:
             if e.resp.status == 404:
-                # History ID is too old, need to do a full sync
-                logger.warning(f"History ID {start_history_id} is too old, no history available")
-                return []
+                logger.warning(
+                    f"History ID {start_history_id} is too old, no history available"
+                )
+                raise StaleHistoryError(start_history_id) from e
             logger.error(f"Failed to fetch history: {e}")
+            raise
+
+    def list_messages_with_label(
+        self,
+        label_id: str,
+        max_results: int = 25,
+    ) -> list[dict[str, str]]:
+        """
+        List recent messages that currently have a specific Gmail label.
+
+        Args:
+            label_id: The Gmail label ID to filter by.
+            max_results: Maximum number of messages to fetch.
+
+        Returns:
+            List of message references with ``id`` and ``threadId``.
+        """
+        try:
+            response = (
+                self.service.users()
+                .messages()
+                .list(
+                    userId="me",
+                    labelIds=[label_id],
+                    maxResults=max_results,
+                )
+                .execute()
+            )
+
+            messages = response.get("messages", [])
+            logger.debug(
+                f"Fetched {len(messages)} labeled messages for label ID {label_id}"
+            )
+            return [
+                {
+                    "id": message["id"],
+                    "threadId": message["threadId"],
+                }
+                for message in messages
+                if "id" in message and "threadId" in message
+            ]
+
+        except HttpError as e:
+            logger.error(f"Failed to list labeled messages for {label_id}: {e}")
             raise
 
     def get_thread(self, thread_id: str) -> list[EmailData]:
